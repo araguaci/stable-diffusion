@@ -1,0 +1,102 @@
+import type { PayloadAction } from '@reduxjs/toolkit';
+import { createSlice } from '@reduxjs/toolkit';
+import { Image } from 'app/types/invokeai';
+import { imageReceived, thumbnailReceived } from 'services/thunks/image';
+
+type GalleryImageObjectFitType = 'contain' | 'cover';
+
+export interface GalleryState {
+  /**
+   * The selected image
+   */
+  selectedImage?: Image;
+  galleryImageMinimumWidth: number;
+  galleryImageObjectFit: GalleryImageObjectFitType;
+  shouldAutoSwitchToNewImages: boolean;
+  galleryWidth: number;
+  shouldUseSingleGalleryColumn: boolean;
+  currentCategory: 'results' | 'uploads';
+}
+
+export const initialGalleryState: GalleryState = {
+  galleryImageMinimumWidth: 64,
+  galleryImageObjectFit: 'cover',
+  shouldAutoSwitchToNewImages: true,
+  galleryWidth: 300,
+  shouldUseSingleGalleryColumn: false,
+  currentCategory: 'results',
+};
+
+export const gallerySlice = createSlice({
+  name: 'gallery',
+  initialState: initialGalleryState,
+  reducers: {
+    imageSelected: (state, action: PayloadAction<Image | undefined>) => {
+      state.selectedImage = action.payload;
+      // TODO: if the user selects an image, disable the auto switch?
+      // state.shouldAutoSwitchToNewImages = false;
+    },
+    setGalleryImageMinimumWidth: (state, action: PayloadAction<number>) => {
+      state.galleryImageMinimumWidth = action.payload;
+    },
+    setGalleryImageObjectFit: (
+      state,
+      action: PayloadAction<GalleryImageObjectFitType>
+    ) => {
+      state.galleryImageObjectFit = action.payload;
+    },
+    setShouldAutoSwitchToNewImages: (state, action: PayloadAction<boolean>) => {
+      state.shouldAutoSwitchToNewImages = action.payload;
+    },
+    setCurrentCategory: (
+      state,
+      action: PayloadAction<'results' | 'uploads'>
+    ) => {
+      state.currentCategory = action.payload;
+    },
+    setGalleryWidth: (state, action: PayloadAction<number>) => {
+      state.galleryWidth = action.payload;
+    },
+    setShouldUseSingleGalleryColumn: (
+      state,
+      action: PayloadAction<boolean>
+    ) => {
+      state.shouldUseSingleGalleryColumn = action.payload;
+    },
+  },
+  extraReducers(builder) {
+    builder.addCase(imageReceived.fulfilled, (state, action) => {
+      // When we get an updated URL for an image, we need to update the selectedImage in gallery,
+      // which is currently its own object (instead of a reference to an image in results/uploads)
+      const { imagePath } = action.payload;
+      const { imageName } = action.meta.arg;
+
+      if (state.selectedImage?.name === imageName) {
+        state.selectedImage.url = imagePath;
+      }
+    });
+
+    builder.addCase(thumbnailReceived.fulfilled, (state, action) => {
+      // When we get an updated URL for an image, we need to update the selectedImage in gallery,
+      // which is currently its own object (instead of a reference to an image in results/uploads)
+      const { thumbnailPath } = action.payload;
+      const { thumbnailName } = action.meta.arg;
+
+      if (state.selectedImage?.name === thumbnailName) {
+        state.selectedImage.thumbnail = thumbnailPath;
+      }
+    });
+  },
+});
+
+export const {
+  imageSelected,
+  setGalleryImageMinimumWidth,
+  setGalleryImageObjectFit,
+  setShouldAutoSwitchToNewImages,
+  setGalleryWidth,
+  setShouldUseSingleGalleryColumn,
+  setCurrentCategory,
+} = gallerySlice.actions;
+
+export default gallerySlice.reducer;
