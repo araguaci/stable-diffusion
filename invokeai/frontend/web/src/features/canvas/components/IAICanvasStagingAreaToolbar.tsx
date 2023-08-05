@@ -1,6 +1,5 @@
 import { ButtonGroup, Flex } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-// import { saveStagingAreaImageToGallery } from 'app/socketio/actions';
 import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import IAIIconButton from 'common/components/IAIIconButton';
 import { canvasSelector } from 'features/canvas/store/canvasSelectors';
@@ -26,13 +25,16 @@ import {
   FaPlus,
   FaSave,
 } from 'react-icons/fa';
+import { stagingAreaImageSaved } from '../store/actions';
+import { useGetImageDTOQuery } from 'services/api/endpoints/images';
+import { skipToken } from '@reduxjs/toolkit/dist/query';
 
 const selector = createSelector(
   [canvasSelector],
   (canvas) => {
     const {
       layerState: {
-        stagingArea: { images, selectedImageIndex },
+        stagingArea: { images, selectedImageIndex, sessionId },
       },
       shouldShowStagingOutline,
       shouldShowStagingImage,
@@ -45,6 +47,7 @@ const selector = createSelector(
       isOnLastImage: selectedImageIndex === images.length - 1,
       shouldShowStagingImage,
       shouldShowStagingOutline,
+      sessionId,
     };
   },
   {
@@ -61,6 +64,7 @@ const IAICanvasStagingAreaToolbar = () => {
     isOnLastImage,
     currentStagingAreaImage,
     shouldShowStagingImage,
+    sessionId,
   } = useAppSelector(selector);
 
   const { t } = useTranslation();
@@ -106,9 +110,24 @@ const IAICanvasStagingAreaToolbar = () => {
     }
   );
 
-  const handlePrevImage = () => dispatch(prevStagingAreaImage());
-  const handleNextImage = () => dispatch(nextStagingAreaImage());
-  const handleAccept = () => dispatch(commitStagingAreaImage());
+  const handlePrevImage = useCallback(
+    () => dispatch(prevStagingAreaImage()),
+    [dispatch]
+  );
+
+  const handleNextImage = useCallback(
+    () => dispatch(nextStagingAreaImage()),
+    [dispatch]
+  );
+
+  const handleAccept = useCallback(
+    () => dispatch(commitStagingAreaImage(sessionId)),
+    [dispatch, sessionId]
+  );
+
+  const { data: imageDTO } = useGetImageDTOQuery(
+    currentStagingAreaImage?.imageName ?? skipToken
+  );
 
   if (!currentStagingAreaImage) return null;
 
@@ -160,12 +179,19 @@ const IAICanvasStagingAreaToolbar = () => {
         <IAIIconButton
           tooltip={t('unifiedCanvas.saveToGallery')}
           aria-label={t('unifiedCanvas.saveToGallery')}
+          isDisabled={!imageDTO || !imageDTO.is_intermediate}
           icon={<FaSave />}
-          onClick={() =>
+          onClick={() => {
+            if (!imageDTO) {
+              return;
+            }
+
             dispatch(
-              saveStagingAreaImageToGallery(currentStagingAreaImage.image.url)
-            )
-          }
+              stagingAreaImageSaved({
+                imageDTO,
+              })
+            );
+          }}
           colorScheme="accent"
         />
         <IAIIconButton

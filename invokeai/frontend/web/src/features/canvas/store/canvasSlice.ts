@@ -1,14 +1,19 @@
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { createSlice } from '@reduxjs/toolkit';
-import * as InvokeAI from 'app/types/invokeai';
 import {
   roundDownToMultiple,
   roundToMultiple,
 } from 'common/util/roundDownToMultiple';
+import { setAspectRatio } from 'features/parameters/store/generationSlice';
+import {
+  setActiveTab,
+  setShouldUseCanvasBetaLayout,
+} from 'features/ui/store/uiSlice';
 import { IRect, Vector2d } from 'konva/lib/types';
 import { clamp, cloneDeep } from 'lodash-es';
-//
 import { RgbaColor } from 'react-colorful';
+import { sessionCanceled } from 'services/api/thunks/session';
+import { ImageDTO } from 'services/api/types';
 import calculateCoordinates from '../util/calculateCoordinates';
 import calculateScale from '../util/calculateScale';
 import { STAGE_PADDING_PERCENTAGE } from '../util/constants';
@@ -157,9 +162,9 @@ export const canvasSlice = createSlice({
     setCursorPosition: (state, action: PayloadAction<Vector2d | null>) => {
       state.cursorPosition = action.payload;
     },
-    setInitialCanvasImage: (state, action: PayloadAction<InvokeAI.Image>) => {
+    setInitialCanvasImage: (state, action: PayloadAction<ImageDTO>) => {
       const image = action.payload;
-      const { width, height } = image.metadata;
+      const { width, height } = image;
       const { stageDimensions } = state;
 
       const newBoundingBoxDimensions = {
@@ -197,7 +202,7 @@ export const canvasSlice = createSlice({
             y: 0,
             width: width,
             height: height,
-            image: image,
+            imageName: image.image_name,
           },
         ],
       };
@@ -233,6 +238,16 @@ export const canvasSlice = createSlice({
         const scaledDimensions = getScaledBoundingBoxDimensions(newDimensions);
         state.scaledBoundingBoxDimensions = scaledDimensions;
       }
+    },
+    flipBoundingBoxAxes: (state) => {
+      const [currWidth, currHeight] = [
+        state.boundingBoxDimensions.width,
+        state.boundingBoxDimensions.height,
+      ];
+      state.boundingBoxDimensions = {
+        width: currHeight,
+        height: currWidth,
+      };
     },
     setBoundingBoxCoordinates: (state, action: PayloadAction<Vector2d>) => {
       state.boundingBoxCoordinates = floorCoordinates(action.payload);
@@ -302,7 +317,7 @@ export const canvasSlice = createSlice({
         selectedImageIndex: -1,
       };
     },
-    addImageToStagingArea: (state, action: PayloadAction<InvokeAI.Image>) => {
+    addImageToStagingArea: (state, action: PayloadAction<ImageDTO>) => {
       const image = action.payload;
 
       if (!image || !state.layerState.stagingArea.boundingBox) {
@@ -319,7 +334,7 @@ export const canvasSlice = createSlice({
         kind: 'image',
         layer: 'base',
         ...state.layerState.stagingArea.boundingBox,
-        image,
+        imageName: image.image_name,
       });
 
       state.layerState.stagingArea.selectedImageIndex =
@@ -696,7 +711,10 @@ export const canvasSlice = createSlice({
         0
       );
     },
-    commitStagingAreaImage: (state) => {
+    commitStagingAreaImage: (
+      state,
+      _action: PayloadAction<string | undefined>
+    ) => {
       if (!state.layerState.stagingArea.images.length) {
         return;
       }
@@ -709,10 +727,13 @@ export const canvasSlice = createSlice({
         state.pastLayerStates.shift();
       }
 
-      state.layerState.objects.push({
-        ...images[selectedImageIndex],
-      });
+      const imageToCommit = images[selectedImageIndex];
 
+      if (imageToCommit) {
+        state.layerState.objects.push({
+          ...imageToCommit,
+        });
+      }
       state.layerState.stagingArea = {
         ...initialLayerState.stagingArea,
       };
@@ -841,6 +862,30 @@ export const canvasSlice = createSlice({
       state.isTransformingBoundingBox = false;
     },
   },
+  extraReducers: (builder) => {
+    builder.addCase(sessionCanceled.pending, (state) => {
+      if (!state.layerState.stagingArea.images.length) {
+        state.layerState.stagingArea = initialLayerState.stagingArea;
+      }
+    });
+
+    builder.addCase(setShouldUseCanvasBetaLayout, (state) => {
+      state.doesCanvasNeedScaling = true;
+    });
+
+    builder.addCase(setActiveTab, (state) => {
+      state.doesCanvasNeedScaling = true;
+    });
+    builder.addCase(setAspectRatio, (state, action) => {
+      const ratio = action.payload;
+      if (ratio) {
+        state.boundingBoxDimensions.height = roundToMultiple(
+          state.boundingBoxDimensions.width / ratio,
+          64
+        );
+      }
+    });
+  },
 });
 
 export const {
@@ -868,6 +913,7 @@ export const {
   setBoundingBoxDimensions,
   setBoundingBoxPreviewFill,
   setBoundingBoxScaleMethod,
+  flipBoundingBoxAxes,
   setBrushColor,
   setBrushSize,
   setCanvasContainerDimensions,

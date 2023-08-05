@@ -1,11 +1,10 @@
 import { Box, Flex } from '@chakra-ui/react';
+import { createSelector } from '@reduxjs/toolkit';
+import { useAppSelector } from 'app/store/storeHooks';
 import { PropsWithChildren, memo } from 'react';
 import { PARAMETERS_PANEL_WIDTH } from 'theme/util/constants';
-import OverlayScrollable from './common/OverlayScrollable';
-import PinParametersPanelButton from './PinParametersPanelButton';
-import { createSelector } from '@reduxjs/toolkit';
 import { uiSelector } from '../store/uiSelectors';
-import { useAppSelector } from 'app/store/storeHooks';
+import PinParametersPanelButton from './PinParametersPanelButton';
 
 const selector = createSelector(uiSelector, (ui) => {
   const { shouldPinParametersPanel, shouldShowParametersPanel } = ui;
@@ -35,19 +34,19 @@ const ParametersPinnedWrapper = (props: ParametersPinnedWrapperProps) => {
         flexShrink: 0,
       }}
     >
-      <OverlayScrollable>
-        <Flex
-          sx={{
-            gap: 2,
-            flexDirection: 'column',
-            h: 'full',
-            w: 'full',
-            position: 'absolute',
-          }}
-        >
-          {props.children}
-        </Flex>
-      </OverlayScrollable>
+      <Flex
+        sx={{
+          gap: 2,
+          flexDirection: 'column',
+          h: 'full',
+          w: 'full',
+          position: 'absolute',
+          overflowY: 'auto',
+        }}
+      >
+        {props.children}
+      </Flex>
+
       <PinParametersPanelButton
         sx={{ position: 'absolute', top: 0, insetInlineEnd: 0 }}
       />

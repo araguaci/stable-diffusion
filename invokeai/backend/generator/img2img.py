@@ -22,7 +22,6 @@ class Img2Img(Generator):
 
     def get_make_image(
         self,
-        prompt,
         sampler,
         steps,
         cfg_scale,
@@ -78,10 +77,7 @@ class Img2Img(Generator):
                 callback=step_callback,
                 seed=seed,
             )
-            if (
-                pipeline_output.attention_map_saver is not None
-                and attention_maps_callback is not None
-            ):
+            if pipeline_output.attention_map_saver is not None and attention_maps_callback is not None:
                 attention_maps_callback(pipeline_output.attention_map_saver)
             return pipeline.numpy_to_pil(pipeline_output.images)[0]
 
@@ -89,13 +85,8 @@ class Img2Img(Generator):
 
     def get_noise_like(self, like: torch.Tensor):
         device = like.device
-        if device.type == "mps":
-            x = torch.randn_like(like, device="cpu").to(device)
-        else:
-            x = torch.randn_like(like, device=device)
+        x = torch.randn_like(like, device=device)
         if self.perlin > 0.0:
             shape = like.shape
-            x = (1 - self.perlin) * x + self.perlin * self.get_perlin_noise(
-                shape[3], shape[2]
-            )
+            x = (1 - self.perlin) * x + self.perlin * self.get_perlin_noise(shape[3], shape[2])
         return x

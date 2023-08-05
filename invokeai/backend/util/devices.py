@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from packaging import version
+import platform
 
 import torch
 from torch import autocast
-
-from invokeai.backend.globals import Globals
+from typing import Union
+from invokeai.app.services.config import InvokeAIAppConfig
 
 CPU_DEVICE = torch.device("cpu")
 CUDA_DEVICE = torch.device("cuda")
 MPS_DEVICE = torch.device("mps")
+config = InvokeAIAppConfig.get_config()
 
 
 def choose_torch_device() -> torch.device:
     """Convenience routine for guessing which GPU device to run model on"""
-    if Globals.always_use_cpu:
+    if config.always_use_cpu:
         return CPU_DEVICE
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -29,11 +32,13 @@ def choose_precision(device: torch.device) -> str:
         device_name = torch.cuda.get_device_name(device)
         if not ("GeForce GTX 1660" in device_name or "GeForce GTX 1650" in device_name):
             return "float16"
+    elif device.type == "mps" and version.parse(platform.mac_ver()[0]) < version.parse("14.0.0"):
+        return "float16"
     return "float32"
 
 
 def torch_dtype(device: torch.device) -> torch.dtype:
-    if Globals.full_precision:
+    if config.full_precision:
         return torch.float32
     if choose_precision(device) == "float16":
         return torch.float16
@@ -50,7 +55,7 @@ def choose_autocast(precision):
     return nullcontext
 
 
-def normalize_device(device: str | torch.device) -> torch.device:
+def normalize_device(device: Union[str, torch.device]) -> torch.device:
     """Ensure device has a device index defined, if appropriate."""
     device = torch.device(device)
     if device.index is None:

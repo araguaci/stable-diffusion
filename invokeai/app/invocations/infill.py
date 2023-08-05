@@ -1,19 +1,20 @@
-# Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
+# Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654) and the InvokeAI Team
 
-from typing import Literal, Optional, Union, get_args
+from typing import Literal, Optional, get_args
 
 import numpy as np
 import math
 from PIL import Image, ImageOps
 from pydantic import Field
 
-from invokeai.app.invocations.image import ImageOutput, build_image_output
+from invokeai.app.invocations.image import ImageOutput
 from invokeai.app.util.misc import SEED_MAX, get_random_seed
 from invokeai.backend.image_util.patchmatch import PatchMatch
 
-from ..models.image import ColorField, ImageField, ImageType
+from ..models.image import ColorField, ImageCategory, ImageField, ResourceOrigin
 from .baseinvocation import (
     BaseInvocation,
+    InvocationConfig,
     InvocationContext,
 )
 
@@ -29,9 +30,7 @@ def infill_methods() -> list[str]:
 
 
 INFILL_METHODS = Literal[tuple(infill_methods())]
-DEFAULT_INFILL_METHOD = (
-    "patchmatch" if "patchmatch" in get_args(INFILL_METHODS) else "tile"
-)
+DEFAULT_INFILL_METHOD = "patchmatch" if "patchmatch" in get_args(INFILL_METHODS) else "tile"
 
 
 def infill_patchmatch(im: Image.Image) -> Image.Image:
@@ -43,9 +42,7 @@ def infill_patchmatch(im: Image.Image) -> Image.Image:
         return im
 
     # Patchmatch (note, we may want to expose patch_size? Increasing it significantly impacts performance though)
-    im_patched_np = PatchMatch.inpaint(
-        im.convert("RGB"), ImageOps.invert(im.split()[-1]), patch_size=3
-    )
+    im_patched_np = PatchMatch.inpaint(im.convert("RGB"), ImageOps.invert(im.split()[-1]), patch_size=3)
     im_patched = Image.fromarray(im_patched_np, mode="RGB")
     return im_patched
 
@@ -67,9 +64,7 @@ def get_tile_images(image: np.ndarray, width=8, height=8):
     )
 
 
-def tile_fill_missing(
-    im: Image.Image, tile_size: int = 16, seed: Union[int, None] = None
-) -> Image.Image:
+def tile_fill_missing(im: Image.Image, tile_size: int = 16, seed: Optional[int] = None) -> Image.Image:
     # Only fill if there's an alpha layer
     if im.mode != "RGBA":
         return im
@@ -102,9 +97,7 @@ def tile_fill_missing(
     # Find all invalid tiles and replace with a random valid tile
     replace_count = (tiles_mask == False).sum()
     rng = np.random.default_rng(seed=seed)
-    tiles_all[np.logical_not(tiles_mask)] = filtered_tiles[
-        rng.choice(filtered_tiles.shape[0], replace_count), :, :, :
-    ]
+    tiles_all[np.logical_not(tiles_mask)] = filtered_tiles[rng.choice(filtered_tiles.shape[0], replace_count), :, :, :]
 
     # Convert back to an image
     tiles_all = tiles_all.reshape(tshape)
@@ -126,35 +119,37 @@ class InfillColorInvocation(BaseInvocation):
 
     type: Literal["infill_rgba"] = "infill_rgba"
     image: Optional[ImageField] = Field(default=None, description="The image to infill")
-    color: Optional[ColorField] = Field(
+    color: ColorField = Field(
         default=ColorField(r=127, g=127, b=127, a=255),
         description="The color to use to infill",
     )
 
+    class Config(InvocationConfig):
+        schema_extra = {
+            "ui": {"title": "Color Infill", "tags": ["image", "inpaint", "color", "infill"]},
+        }
+
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        image = context.services.images.get_pil_image(self.image.image_name)
 
         solid_bg = Image.new("RGBA", image.size, self.color.tuple())
-        infilled = Image.alpha_composite(solid_bg, image)
+        infilled = Image.alpha_composite(solid_bg, image.convert("RGBA"))
 
         infilled.paste(image, (0, 0), image.split()[-1])
 
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=infilled,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
 
-        metadata = context.services.metadata.build_metadata(
-            session_id=context.graph_execution_state_id, node=self
-        )
-
-        context.services.images.save(image_type, image_name, infilled, metadata)
-        return build_image_output(
-            image_type=image_type,
-            image_name=image_name,
-            image=image,
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )
 
 
@@ -172,30 +167,30 @@ class InfillTileInvocation(BaseInvocation):
         default_factory=get_random_seed,
     )
 
-    def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+    class Config(InvocationConfig):
+        schema_extra = {
+            "ui": {"title": "Tile Infill", "tags": ["image", "inpaint", "tile", "infill"]},
+        }
 
-        infilled = tile_fill_missing(
-            image.copy(), seed=self.seed, tile_size=self.tile_size
-        )
+    def invoke(self, context: InvocationContext) -> ImageOutput:
+        image = context.services.images.get_pil_image(self.image.image_name)
+
+        infilled = tile_fill_missing(image.copy(), seed=self.seed, tile_size=self.tile_size)
         infilled.paste(image, (0, 0), image.split()[-1])
 
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=infilled,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
 
-        metadata = context.services.metadata.build_metadata(
-            session_id=context.graph_execution_state_id, node=self
-        )
-
-        context.services.images.save(image_type, image_name, infilled, metadata)
-        return build_image_output(
-            image_type=image_type,
-            image_name=image_name,
-            image=image,
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )
 
 
@@ -206,28 +201,30 @@ class InfillPatchMatchInvocation(BaseInvocation):
 
     image: Optional[ImageField] = Field(default=None, description="The image to infill")
 
+    class Config(InvocationConfig):
+        schema_extra = {
+            "ui": {"title": "Patch Match Infill", "tags": ["image", "inpaint", "patchmatch", "infill"]},
+        }
+
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
+        image = context.services.images.get_pil_image(self.image.image_name)
 
         if PatchMatch.patchmatch_available():
             infilled = infill_patchmatch(image.copy())
         else:
             raise ValueError("PatchMatch is not available on this system")
 
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        image_dto = context.services.images.create(
+            image=infilled,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
 
-        metadata = context.services.metadata.build_metadata(
-            session_id=context.graph_execution_state_id, node=self
-        )
-
-        context.services.images.save(image_type, image_name, infilled, metadata)
-        return build_image_output(
-            image_type=image_type,
-            image_name=image_name,
-            image=image,
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )

@@ -1,7 +1,17 @@
 import { createAction } from '@reduxjs/toolkit';
-import { Image } from 'app/types/invokeai';
-import { SelectedImage } from 'features/parameters/store/actions';
+import { ImageUsage } from 'features/deleteImageModal/store/types';
+import { BoardDTO } from 'services/api/types';
 
-export const requestedImageDeletion = createAction<
-  Image | SelectedImage | undefined
->('gallery/requestedImageDeletion');
+export type RequestedBoardImagesDeletionArg = {
+  board: BoardDTO;
+  imagesUsage: ImageUsage;
+};
+
+export const requestedBoardImagesDeletion =
+  createAction<RequestedBoardImagesDeletionArg>(
+    'gallery/requestedBoardImagesDeletion'
+  );
+
+export const sentImageToCanvas = createAction('gallery/sentImageToCanvas');
+
+export const sentImageToImg2Img = createAction('gallery/sentImageToImg2Img');

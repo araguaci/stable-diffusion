@@ -1,24 +1,38 @@
-import { startAppListening } from '..';
-import { buildImageToImageGraph } from 'features/nodes/util/graphBuilders/buildImageToImageGraph';
-import { sessionCreated } from 'services/thunks/session';
-import { log } from 'app/logging/useLogger';
-import { imageToImageGraphBuilt } from 'features/nodes/store/actions';
+import { logger } from 'app/logging/logger';
 import { userInvoked } from 'app/store/actions';
-
-const moduleLog = log.child({ namespace: 'invoke' });
+import { parseify } from 'common/util/serialize';
+import { imageToImageGraphBuilt } from 'features/nodes/store/actions';
+import { buildLinearImageToImageGraph } from 'features/nodes/util/graphBuilders/buildLinearImageToImageGraph';
+import { buildLinearSDXLImageToImageGraph } from 'features/nodes/util/graphBuilders/buildLinearSDXLImageToImageGraph';
+import { sessionReadyToInvoke } from 'features/system/store/actions';
+import { sessionCreated } from 'services/api/thunks/session';
+import { startAppListening } from '..';
 
 export const addUserInvokedImageToImageListener = () => {
   startAppListening({
     predicate: (action): action is ReturnType<typeof userInvoked> =>
       userInvoked.match(action) && action.payload === 'img2img',
-    effect: (action, { getState, dispatch }) => {
+    effect: async (action, { getState, dispatch, take }) => {
+      const log = logger('session');
       const state = getState();
+      const model = state.generation.model;
 
-      const graph = buildImageToImageGraph(state);
+      let graph;
+
+      if (model && model.base_model === 'sdxl') {
+        graph = buildLinearSDXLImageToImageGraph(state);
+      } else {
+        graph = buildLinearImageToImageGraph(state);
+      }
+
       dispatch(imageToImageGraphBuilt(graph));
-      moduleLog({ data: graph }, 'Image to Image graph built');
+      log.debug({ graph: parseify(graph) }, 'Image to Image graph built');
 
       dispatch(sessionCreated({ graph }));
+
+      await take(sessionCreated.fulfilled.match);
+
+      dispatch(sessionReadyToInvoke());
     },
   });
 };

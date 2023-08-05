@@ -34,11 +34,10 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+# dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -79,6 +78,7 @@ cov.xml
 .pytest.ini
 cover/
 junit/
+notes/
 
 # Translations
 *.mo
@@ -200,6 +200,9 @@ testtube
 checkpoints
 # If it's a Mac
 .DS_Store
+
+invokeai/frontend/yarn.lock
+invokeai/frontend/node_modules
 
 # Let the frontend manage its own gitignore
 !invokeai/frontend/web/*

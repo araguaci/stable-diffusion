@@ -1,24 +1,20 @@
 import { Middleware, MiddlewareAPI } from '@reduxjs/toolkit';
-import { io, Socket } from 'socket.io-client';
-
+import { AppThunkDispatch, RootState } from 'app/store/store';
+import { $authToken, $baseUrl } from 'services/api/client';
+import { sessionCreated } from 'services/api/thunks/session';
 import {
   ClientToServerEvents,
   ServerToClientEvents,
 } from 'services/events/types';
-import { socketSubscribed, socketUnsubscribed } from './actions';
-import { AppThunkDispatch, RootState } from 'app/store/store';
-import { getTimestamp } from 'common/util/getTimestamp';
-import { sessionInvoked, sessionCreated } from 'services/thunks/session';
-import { OpenAPI } from 'services/api';
 import { setEventListeners } from 'services/events/util/setEventListeners';
-import { log } from 'app/logging/useLogger';
-
-const socketioLog = log.child({ namespace: 'socketio' });
+import { Socket, io } from 'socket.io-client';
+import { socketSubscribed, socketUnsubscribed } from './actions';
 
 export const socketMiddleware = () => {
   let areListenersSet = false;
 
-  let socketUrl = `ws://${window.location.host}`;
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  let socketUrl = `${wsProtocol}://${window.location.host}`;
 
   const socketOptions: Parameters<typeof io>[0] = {
     timeout: 60000,
@@ -28,14 +24,16 @@ export const socketMiddleware = () => {
 
   // if building in package mode, replace socket url with open api base url minus the http protocol
   if (['nodes', 'package'].includes(import.meta.env.MODE)) {
-    if (OpenAPI.BASE) {
+    const baseUrl = $baseUrl.get();
+    if (baseUrl) {
       //eslint-disable-next-line
-      socketUrl = OpenAPI.BASE.replace(/^https?\:\/\//i, '');
+      socketUrl = baseUrl.replace(/^https?\:\/\//i, '');
     }
 
-    if (OpenAPI.TOKEN) {
+    const authToken = $authToken.get();
+    if (authToken) {
       // TODO: handle providing jwt to socket.io
-      socketOptions.auth = { token: OpenAPI.TOKEN };
+      socketOptions.auth = { token: authToken };
     }
 
     socketOptions.transports = ['websocket', 'polling'];
@@ -55,7 +53,7 @@ export const socketMiddleware = () => {
       // Set listeners for `connect` and `disconnect` events once
       // Must happen in middleware to get access to `dispatch`
       if (!areListenersSet) {
-        setEventListeners({ storeApi, socket, log: socketioLog });
+        setEventListeners({ storeApi, socket });
 
         areListenersSet = true;
 
@@ -64,15 +62,9 @@ export const socketMiddleware = () => {
 
       if (sessionCreated.fulfilled.match(action)) {
         const sessionId = action.payload.id;
-        const sessionLog = socketioLog.child({ sessionId });
         const oldSessionId = getState().system.sessionId;
 
         if (oldSessionId) {
-          sessionLog.debug(
-            { oldSessionId },
-            `Unsubscribed from old session (${oldSessionId})`
-          );
-
           socket.emit('unsubscribe', {
             session: oldSessionId,
           });
@@ -80,24 +72,17 @@ export const socketMiddleware = () => {
           dispatch(
             socketUnsubscribed({
               sessionId: oldSessionId,
-              timestamp: getTimestamp(),
             })
           );
         }
-
-        sessionLog.debug(`Subscribe to new session (${sessionId})`);
 
         socket.emit('subscribe', { session: sessionId });
 
         dispatch(
           socketSubscribed({
             sessionId: sessionId,
-            timestamp: getTimestamp(),
           })
         );
-
-        // Finally we actually invoke the session, starting processing
-        dispatch(sessionInvoked({ sessionId }));
       }
 
       next(action);

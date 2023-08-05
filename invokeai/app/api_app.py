@@ -1,9 +1,12 @@
-# Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
+# Copyright (c) 2022-2023 Kyle Schouviller (https://github.com/kyle0654) and the InvokeAI Team
 import asyncio
+import sys
 from inspect import signature
 
+import logging
 import uvicorn
-import invokeai.backend.util.logging as logger
+import socket
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
@@ -11,13 +14,43 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
 from fastapi_events.handlers.local import local_handler
 from fastapi_events.middleware import EventHandlerASGIMiddleware
+from pathlib import Path
 from pydantic.schema import schema
 
-from ..backend import Args
+# This should come early so that modules can log their initialization properly
+from .services.config import InvokeAIAppConfig
+from ..backend.util.logging import InvokeAILogger
+
+app_config = InvokeAIAppConfig.get_config()
+app_config.parse_args()
+logger = InvokeAILogger.getLogger(config=app_config)
+from invokeai.version.invokeai_version import __version__
+
+# we call this early so that the message appears before
+# other invokeai initialization messages
+if app_config.version:
+    print(f"InvokeAI version {__version__}")
+    sys.exit(0)
+
+import invokeai.frontend.web as web_dir
+import mimetypes
+
 from .api.dependencies import ApiDependencies
-from .api.routers import images, sessions, models
+from .api.routers import sessions, models, images, boards, board_images, app_info
 from .api.sockets import SocketIO
 from .invocations.baseinvocation import BaseInvocation
+
+
+import torch
+import invokeai.backend.util.hotfixes
+
+if torch.backends.mps.is_available():
+    import invokeai.backend.util.mps_fixes
+
+# fix for windows mimetypes registry entries being borked
+# see https://github.com/invoke-ai/InvokeAI/discussions/3684#discussioncomment-6391352
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 # Create the app
 # TODO: create this all in a method so configuration/etc. can be passed in?
@@ -27,37 +60,25 @@ app = FastAPI(title="Invoke AI", docs_url=None, redoc_url=None)
 event_handler_id: int = id(app)
 app.add_middleware(
     EventHandlerASGIMiddleware,
-    handlers=[
-        local_handler
-    ],  # TODO: consider doing this in services to support different configurations
+    handlers=[local_handler],  # TODO: consider doing this in services to support different configurations
     middleware_id=event_handler_id,
 )
 
-# Add CORS
-# TODO: use configuration for this
-origins = []
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 socket_io = SocketIO(app)
-
-config = {}
 
 
 # Add startup event to load dependencies
 @app.on_event("startup")
 async def startup_event():
-    config = Args()
-    config.parse_args()
-
-    ApiDependencies.initialize(
-        config=config, event_handler_id=event_handler_id, logger=logger
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=app_config.allow_origins,
+        allow_credentials=app_config.allow_credentials,
+        allow_methods=app_config.allow_methods,
+        allow_headers=app_config.allow_headers,
     )
+
+    ApiDependencies.initialize(config=app_config, event_handler_id=event_handler_id, logger=logger)
 
 
 # Shut down threads
@@ -74,9 +95,15 @@ async def shutdown_event():
 
 app.include_router(sessions.session_router, prefix="/api")
 
+app.include_router(models.models_router, prefix="/api")
+
 app.include_router(images.images_router, prefix="/api")
 
-app.include_router(models.models_router, prefix="/api")
+app.include_router(boards.boards_router, prefix="/api")
+
+app.include_router(board_images.board_images_router, prefix="/api")
+
+app.include_router(app_info.app_router, prefix="/api")
 
 
 # Build a custom OpenAPI to include all outputs
@@ -117,6 +144,23 @@ def custom_openapi():
 
         invoker_schema["output"] = outputs_ref
 
+    from invokeai.backend.model_management.models import get_model_config_enums
+
+    for model_config_format_enum in set(get_model_config_enums()):
+        name = model_config_format_enum.__qualname__
+
+        if name in openapi_schema["components"]["schemas"]:
+            # print(f"Config with name {name} already defined")
+            continue
+
+        # "BaseModelType":{"title":"BaseModelType","description":"An enumeration.","enum":["sd-1","sd-2"],"type":"string"}
+        openapi_schema["components"]["schemas"][name] = dict(
+            title=name,
+            description="An enumeration.",
+            type="string",
+            enum=list(v.value for v in model_config_format_enum),
+        )
+
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
@@ -124,7 +168,8 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # Override API doc favicons
-app.mount("/static", StaticFiles(directory="static/dream_web"), name="static")
+app.mount("/static", StaticFiles(directory=Path(web_dir.__path__[0], "static/dream_web")), name="static")
+
 
 @app.get("/docs", include_in_schema=False)
 def overridden_swagger():
@@ -143,17 +188,48 @@ def overridden_redoc():
         redoc_favicon_url="/static/favicon.ico",
     )
 
+
 # Must mount *after* the other routes else it borks em
-app.mount("/", StaticFiles(directory="invokeai/frontend/web/dist", html=True), name="ui")
+app.mount("/", StaticFiles(directory=Path(web_dir.__path__[0], "dist"), html=True), name="ui")
+
 
 def invoke_api():
-    # Start our own event loop for eventing usage
-    # TODO: determine if there's a better way to do this
-    loop = asyncio.new_event_loop()
-    config = uvicorn.Config(app=app, host="0.0.0.0", port=9090, loop=loop)
-    # Use access_log to turn off logging
+    def find_port(port: int):
+        """Find a port not in use starting at given port"""
+        # Taken from https://waylonwalker.com/python-find-available-port/, thanks Waylon!
+        # https://github.com/WaylonWalker
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("localhost", port)) == 0:
+                return find_port(port=port + 1)
+            else:
+                return port
 
+    from invokeai.backend.install.check_root import check_invokeai_root
+
+    check_invokeai_root(app_config)  # note, may exit with an exception if root not set up
+
+    port = find_port(app_config.port)
+    if port != app_config.port:
+        logger.warn(f"Port {app_config.port} in use, using port {port}")
+
+    # Start our own event loop for eventing usage
+    loop = asyncio.new_event_loop()
+    config = uvicorn.Config(
+        app=app,
+        host=app_config.host,
+        port=port,
+        loop=loop,
+        log_level=app_config.log_level,
+    )
     server = uvicorn.Server(config)
+
+    # replace uvicorn's loggers with InvokeAI's for consistent appearance
+    for logname in ["uvicorn.access", "uvicorn"]:
+        l = logging.getLogger(logname)
+        l.handlers.clear()
+        for ch in logger.handlers:
+            l.addHandler(ch)
+
     loop.run_until_complete(server.serve())
 
 

@@ -1,30 +1,31 @@
-import ProcessButtons from 'features/parameters/components/ProcessButtons/ProcessButtons';
-import ParamSeedCollapse from 'features/parameters/components/Parameters/Seed/ParamSeedCollapse';
-import ParamVariationCollapse from 'features/parameters/components/Parameters/Variations/ParamVariationCollapse';
-import ParamSymmetryCollapse from 'features/parameters/components/Parameters/Symmetry/ParamSymmetryCollapse';
-import ParamBoundingBoxCollapse from 'features/parameters/components/Parameters/Canvas/BoundingBox/ParamBoundingBoxCollapse';
+import ParamDynamicPromptsCollapse from 'features/dynamicPrompts/components/ParamDynamicPromptsCollapse';
+import ParamLoraCollapse from 'features/lora/components/ParamLoraCollapse';
+import ParamAdvancedCollapse from 'features/parameters/components/Parameters/Advanced/ParamAdvancedCollapse';
 import ParamInfillAndScalingCollapse from 'features/parameters/components/Parameters/Canvas/InfillAndScaling/ParamInfillAndScalingCollapse';
 import ParamSeamCorrectionCollapse from 'features/parameters/components/Parameters/Canvas/SeamCorrection/ParamSeamCorrectionCollapse';
+import ParamControlNetCollapse from 'features/parameters/components/Parameters/ControlNet/ParamControlNetCollapse';
+import ParamSymmetryCollapse from 'features/parameters/components/Parameters/Symmetry/ParamSymmetryCollapse';
+// import ParamVariationCollapse from 'features/parameters/components/Parameters/Variations/ParamVariationCollapse';
+import ParamPromptArea from 'features/parameters/components/Parameters/Prompt/ParamPromptArea';
+import ProcessButtons from 'features/parameters/components/ProcessButtons/ProcessButtons';
 import UnifiedCanvasCoreParameters from './UnifiedCanvasCoreParameters';
-import { memo } from 'react';
-import ParamPositiveConditioning from 'features/parameters/components/Parameters/Core/ParamPositiveConditioning';
-import ParamNegativeConditioning from 'features/parameters/components/Parameters/Core/ParamNegativeConditioning';
 
 const UnifiedCanvasParameters = () => {
   return (
     <>
-      <ParamPositiveConditioning />
-      <ParamNegativeConditioning />
+      <ParamPromptArea />
       <ProcessButtons />
       <UnifiedCanvasCoreParameters />
-      <ParamSeedCollapse />
-      <ParamVariationCollapse />
+      <ParamControlNetCollapse />
+      <ParamLoraCollapse />
+      <ParamDynamicPromptsCollapse />
+      {/* <ParamVariationCollapse /> */}
       <ParamSymmetryCollapse />
-      <ParamBoundingBoxCollapse />
       <ParamSeamCorrectionCollapse />
       <ParamInfillAndScalingCollapse />
+      <ParamAdvancedCollapse />
     </>
   );
 };
 
-export default memo(UnifiedCanvasParameters);
+export default UnifiedCanvasParameters;

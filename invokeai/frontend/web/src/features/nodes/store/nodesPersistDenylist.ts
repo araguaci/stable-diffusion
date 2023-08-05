@@ -1,14 +1,9 @@
-import { NodesState } from './nodesSlice';
+import { NodesState } from './types';
 
 /**
  * Nodes slice persist denylist
  */
-const itemsToDenylist: (keyof NodesState)[] = ['schema', 'invocationTemplates'];
 export const nodesPersistDenylist: (keyof NodesState)[] = [
   'schema',
   'invocationTemplates',
 ];
-
-export const nodesDenylist = itemsToDenylist.map(
-  (denylistItem) => `nodes.${denylistItem}`
-);

@@ -1,18 +1,16 @@
 import { createSelector } from '@reduxjs/toolkit';
+import { stateSelector } from 'app/store/store';
 import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
+import { defaultSelectorOptions } from 'app/store/util/defaultMemoizeOptions';
 import IAINumberInput from 'common/components/IAINumberInput';
 import IAISlider from 'common/components/IAISlider';
-import { generationSelector } from 'features/parameters/store/generationSelectors';
 import { setCfgScale } from 'features/parameters/store/generationSlice';
-import { configSelector } from 'features/system/store/configSelectors';
-import { hotkeysSelector } from 'features/ui/store/hotkeysSlice';
-import { uiSelector } from 'features/ui/store/uiSelectors';
 import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const selector = createSelector(
-  [generationSelector, configSelector, uiSelector, hotkeysSelector],
-  (generation, config, ui, hotkeys) => {
+  [stateSelector],
+  ({ generation, config, ui, hotkeys }) => {
     const { initial, min, sliderMax, inputMax } = config.sd.guidance;
     const { cfgScale } = generation;
     const { shouldUseSliders } = ui;
@@ -27,7 +25,8 @@ const selector = createSelector(
       shouldUseSliders,
       shift,
     };
-  }
+  },
+  defaultSelectorOptions
 );
 
 const ParamCFGScale = () => {

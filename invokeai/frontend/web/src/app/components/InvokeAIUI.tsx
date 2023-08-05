@@ -1,3 +1,6 @@
+import { Middleware } from '@reduxjs/toolkit';
+import { store } from 'app/store/store';
+import { PartialAppConfig } from 'app/types/invokeai';
 import React, {
   lazy,
   memo,
@@ -6,15 +9,12 @@ import React, {
   useEffect,
 } from 'react';
 import { Provider } from 'react-redux';
-import { store } from 'app/store/store';
-import { OpenAPI } from 'services/api';
-
-import Loading from '../../common/components/Loading/Loading';
 import { addMiddleware, resetMiddlewares } from 'redux-dynamic-middlewares';
-import { PartialAppConfig } from 'app/types/invokeai';
-
-import '../../i18n';
+import { $authToken, $baseUrl, $projectId } from 'services/api/client';
 import { socketMiddleware } from 'services/events/middleware';
+import Loading from '../../common/components/Loading/Loading';
+import '../../i18n';
+import ImageDndContext from './ImageDnd/ImageDndContext';
 
 const App = lazy(() => import('./App'));
 const ThemeLocaleProvider = lazy(() => import('./ThemeLocaleProvider'));
@@ -24,18 +24,32 @@ interface Props extends PropsWithChildren {
   token?: string;
   config?: PartialAppConfig;
   headerComponent?: ReactNode;
+  middleware?: Middleware[];
+  projectId?: string;
 }
 
-const InvokeAIUI = ({ apiUrl, token, config, headerComponent }: Props) => {
+const InvokeAIUI = ({
+  apiUrl,
+  token,
+  config,
+  headerComponent,
+  middleware,
+  projectId,
+}: Props) => {
   useEffect(() => {
     // configure API client token
     if (token) {
-      OpenAPI.TOKEN = token;
+      $authToken.set(token);
     }
 
     // configure API client base url
     if (apiUrl) {
-      OpenAPI.BASE = apiUrl;
+      $baseUrl.set(apiUrl);
+    }
+
+    // configure API client project header
+    if (projectId) {
+      $projectId.set(projectId);
     }
 
     // reset dynamically added middlewares
@@ -47,15 +61,28 @@ const InvokeAIUI = ({ apiUrl, token, config, headerComponent }: Props) => {
     // the `apiUrl`/`token` dynamically.
 
     // rebuild socket middleware with token and apiUrl
-    addMiddleware(socketMiddleware());
-  }, [apiUrl, token]);
+    if (middleware && middleware.length > 0) {
+      addMiddleware(socketMiddleware(), ...middleware);
+    } else {
+      addMiddleware(socketMiddleware());
+    }
+
+    return () => {
+      // Reset the API client token and base url on unmount
+      $baseUrl.set(undefined);
+      $authToken.set(undefined);
+      $projectId.set(undefined);
+    };
+  }, [apiUrl, token, middleware, projectId]);
 
   return (
     <React.StrictMode>
       <Provider store={store}>
         <React.Suspense fallback={<Loading />}>
           <ThemeLocaleProvider>
-            <App config={config} headerComponent={headerComponent} />
+            <ImageDndContext>
+              <App config={config} headerComponent={headerComponent} />
+            </ImageDndContext>
           </ThemeLocaleProvider>
         </React.Suspense>
       </Provider>

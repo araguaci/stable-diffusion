@@ -3,15 +3,24 @@ import { memo } from 'react';
 import { InputFieldTemplate, InputFieldValue } from '../types/types';
 import ArrayInputFieldComponent from './fields/ArrayInputFieldComponent';
 import BooleanInputFieldComponent from './fields/BooleanInputFieldComponent';
-import EnumInputFieldComponent from './fields/EnumInputFieldComponent';
-import ImageInputFieldComponent from './fields/ImageInputFieldComponent';
-import LatentsInputFieldComponent from './fields/LatentsInputFieldComponent';
+import ClipInputFieldComponent from './fields/ClipInputFieldComponent';
+import ColorInputFieldComponent from './fields/ColorInputFieldComponent';
 import ConditioningInputFieldComponent from './fields/ConditioningInputFieldComponent';
+import ControlInputFieldComponent from './fields/ControlInputFieldComponent';
+import ControlNetModelInputFieldComponent from './fields/ControlNetModelInputFieldComponent';
+import EnumInputFieldComponent from './fields/EnumInputFieldComponent';
+import ImageCollectionInputFieldComponent from './fields/ImageCollectionInputFieldComponent';
+import ImageInputFieldComponent from './fields/ImageInputFieldComponent';
+import ItemInputFieldComponent from './fields/ItemInputFieldComponent';
+import LatentsInputFieldComponent from './fields/LatentsInputFieldComponent';
+import LoRAModelInputFieldComponent from './fields/LoRAModelInputFieldComponent';
 import ModelInputFieldComponent from './fields/ModelInputFieldComponent';
 import NumberInputFieldComponent from './fields/NumberInputFieldComponent';
 import StringInputFieldComponent from './fields/StringInputFieldComponent';
-import ColorInputFieldComponent from './fields/ColorInputFieldComponent';
-import ItemInputFieldComponent from './fields/ItemInputFieldComponent';
+import UnetInputFieldComponent from './fields/UnetInputFieldComponent';
+import VaeInputFieldComponent from './fields/VaeInputFieldComponent';
+import VaeModelInputFieldComponent from './fields/VaeModelInputFieldComponent';
+import RefinerModelInputFieldComponent from './fields/RefinerModelInputFieldComponent';
 
 type InputFieldComponentProps = {
   nodeId: string;
@@ -97,9 +106,89 @@ const InputFieldComponent = (props: InputFieldComponentProps) => {
     );
   }
 
+  if (type === 'unet' && template.type === 'unet') {
+    return (
+      <UnetInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'clip' && template.type === 'clip') {
+    return (
+      <ClipInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'vae' && template.type === 'vae') {
+    return (
+      <VaeInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'control' && template.type === 'control') {
+    return (
+      <ControlInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
   if (type === 'model' && template.type === 'model') {
     return (
       <ModelInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'refiner_model' && template.type === 'refiner_model') {
+    return (
+      <RefinerModelInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'vae_model' && template.type === 'vae_model') {
+    return (
+      <VaeModelInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'lora_model' && template.type === 'lora_model') {
+    return (
+      <LoRAModelInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'controlnet_model' && template.type === 'controlnet_model') {
+    return (
+      <ControlNetModelInputFieldComponent
         nodeId={nodeId}
         field={field}
         template={template}
@@ -140,6 +229,16 @@ const InputFieldComponent = (props: InputFieldComponentProps) => {
   if (type === 'item' && template.type === 'item') {
     return (
       <ItemInputFieldComponent
+        nodeId={nodeId}
+        field={field}
+        template={template}
+      />
+    );
+  }
+
+  if (type === 'image_collection' && template.type === 'image_collection') {
+    return (
+      <ImageCollectionInputFieldComponent
         nodeId={nodeId}
         field={field}
         template={template}

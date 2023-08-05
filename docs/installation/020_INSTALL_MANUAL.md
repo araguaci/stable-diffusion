@@ -32,7 +32,7 @@ gaming):
 
 * **Python**
 
-    version 3.9 or 3.10 (3.11 is not recommended).
+    version 3.9 through 3.11
 
 * **CUDA Tools**
 
@@ -65,7 +65,7 @@ gaming):
 To install InvokeAI with virtual environments and the PIP package
 manager, please follow these steps:
 
-1.  Please make sure you are using Python 3.9 or 3.10. The rest of the install
+1.  Please make sure you are using Python 3.9 through 3.11. The rest of the install
     procedure depends on this and will not work with other versions:
 
     ```bash
@@ -192,8 +192,10 @@ manager, please follow these steps:
     your outputs.
 
     ```terminal
-    invokeai-configure
+    invokeai-configure --root .
     ```
+	
+	Don't miss the dot at the end of the command!
 
     The script `invokeai-configure` will interactively guide you through the
     process of downloading and installing the weights files needed for InvokeAI.
@@ -216,7 +218,7 @@ manager, please follow these steps:
 9.  Run the command-line- or the web- interface:
 
     From within INVOKEAI_ROOT, activate the environment
-    (with `source .venv/bin/activate` or `.venv\scripts\activate), and then run
+    (with `source .venv/bin/activate` or `.venv\scripts\activate`), and then run
     the script `invokeai`. If the virtual environment you selected is NOT inside
     INVOKEAI_ROOT, then you must specify the path to the root directory by adding
     `--root_dir \path\to\invokeai` to the commands below:
@@ -224,12 +226,6 @@ manager, please follow these steps:
     !!! example ""
 
         !!! warning "Make sure that the virtual environment is activated, which should create `(.venv)` in front of your prompt!"
-
-        === "CLI"
-
-            ```bash
-            invokeai
-            ```
 
         === "local Webserver"
 
@@ -241,6 +237,12 @@ manager, please follow these steps:
 
             ```bash
             invokeai --web --host 0.0.0.0
+            ```
+
+        === "CLI"
+
+            ```bash
+            invokeai
             ```
 
         If you choose the run the web interface, point your browser at
@@ -256,7 +258,7 @@ manager, please follow these steps:
 
 10.  Render away!
 
-    Browse the [features](../features/CLI.md) section to learn about all the
+    Browse the [features](../features/index.md) section to learn about all the
     things you can do with InvokeAI.
 
 
@@ -270,7 +272,7 @@ manager, please follow these steps:
 
 12. Other scripts
 
-    The [Textual Inversion](../features/TEXTUAL_INVERSION.md) script can be launched with the command:
+    The [Textual Inversion](../features/TRAINING.md) script can be launched with the command:
 
     ```bash
     invokeai-ti --gui

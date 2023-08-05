@@ -1,19 +1,20 @@
 import { createSelector } from '@reduxjs/toolkit';
+import { stateSelector } from 'app/store/store';
 import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
+import { defaultSelectorOptions } from 'app/store/util/defaultMemoizeOptions';
 import IAISlider, { IAIFullSliderProps } from 'common/components/IAISlider';
-import { generationSelector } from 'features/parameters/store/generationSelectors';
-import { setHeight } from 'features/parameters/store/generationSlice';
-import { configSelector } from 'features/system/store/configSelectors';
-import { hotkeysSelector } from 'features/ui/store/hotkeysSlice';
+import { roundToMultiple } from 'common/util/roundDownToMultiple';
+import { setHeight, setWidth } from 'features/parameters/store/generationSlice';
 import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
 const selector = createSelector(
-  [generationSelector, hotkeysSelector, configSelector],
-  (generation, hotkeys, config) => {
+  [stateSelector],
+  ({ generation, hotkeys, config }) => {
     const { initial, min, sliderMax, inputMax, fineStep, coarseStep } =
       config.sd.height;
     const { height } = generation;
+    const { aspectRatio } = generation;
 
     const step = hotkeys.shift ? fineStep : coarseStep;
 
@@ -24,8 +25,10 @@ const selector = createSelector(
       sliderMax,
       inputMax,
       step,
+      aspectRatio,
     };
-  }
+  },
+  defaultSelectorOptions
 );
 
 type ParamHeightProps = Omit<
@@ -34,7 +37,7 @@ type ParamHeightProps = Omit<
 >;
 
 const ParamHeight = (props: ParamHeightProps) => {
-  const { height, initial, min, sliderMax, inputMax, step } =
+  const { height, initial, min, sliderMax, inputMax, step, aspectRatio } =
     useAppSelector(selector);
   const dispatch = useAppDispatch();
   const { t } = useTranslation();
@@ -42,13 +45,21 @@ const ParamHeight = (props: ParamHeightProps) => {
   const handleChange = useCallback(
     (v: number) => {
       dispatch(setHeight(v));
+      if (aspectRatio) {
+        const newWidth = roundToMultiple(v * aspectRatio, 8);
+        dispatch(setWidth(newWidth));
+      }
     },
-    [dispatch]
+    [dispatch, aspectRatio]
   );
 
   const handleReset = useCallback(() => {
     dispatch(setHeight(initial));
-  }, [dispatch, initial]);
+    if (aspectRatio) {
+      const newWidth = roundToMultiple(initial * aspectRatio, 8);
+      dispatch(setWidth(newWidth));
+    }
+  }, [dispatch, initial, aspectRatio]);
 
   return (
     <IAISlider

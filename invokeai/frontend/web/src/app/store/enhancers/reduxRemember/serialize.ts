@@ -1,12 +1,9 @@
 import { canvasPersistDenylist } from 'features/canvas/store/canvasPersistDenylist';
+import { controlNetDenylist } from 'features/controlNet/store/controlNetDenylist';
 import { galleryPersistDenylist } from 'features/gallery/store/galleryPersistDenylist';
-import { resultsPersistDenylist } from 'features/gallery/store/resultsPersistDenylist';
-import { uploadsPersistDenylist } from 'features/gallery/store/uploadsPersistDenylist';
-import { lightboxPersistDenylist } from 'features/lightbox/store/lightboxPersistDenylist';
 import { nodesPersistDenylist } from 'features/nodes/store/nodesPersistDenylist';
 import { generationPersistDenylist } from 'features/parameters/store/generationPersistDenylist';
 import { postprocessingPersistDenylist } from 'features/parameters/store/postprocessingPersistDenylist';
-import { modelsPersistDenylist } from 'features/system/store/modelsPersistDenylist';
 import { systemPersistDenylist } from 'features/system/store/systemPersistDenylist';
 import { uiPersistDenylist } from 'features/ui/store/uiPersistDenylist';
 import { omit } from 'lodash-es';
@@ -18,19 +15,14 @@ const serializationDenylist: {
   canvas: canvasPersistDenylist,
   gallery: galleryPersistDenylist,
   generation: generationPersistDenylist,
-  lightbox: lightboxPersistDenylist,
-  models: modelsPersistDenylist,
   nodes: nodesPersistDenylist,
   postprocessing: postprocessingPersistDenylist,
-  results: resultsPersistDenylist,
   system: systemPersistDenylist,
-  // config: configPersistDenyList,
   ui: uiPersistDenylist,
-  uploads: uploadsPersistDenylist,
-  // hotkeys: hotkeysPersistDenylist,
+  controlNet: controlNetDenylist,
 };
 
 export const serialize: SerializeFunction = (data, key) => {
-  const result = omit(data, serializationDenylist[key]);
+  const result = omit(data, serializationDenylist[key] ?? []);
   return JSON.stringify(result);
 };

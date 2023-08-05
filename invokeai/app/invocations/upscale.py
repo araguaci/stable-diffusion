@@ -1,60 +1,121 @@
-# Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
-
+# Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654) & the InvokeAI Team
+from pathlib import Path
 from typing import Literal, Union
 
+import cv2 as cv
+import numpy as np
+from basicsr.archs.rrdbnet_arch import RRDBNet
+from PIL import Image
 from pydantic import Field
+from realesrgan import RealESRGANer
 
-from invokeai.app.models.image import ImageField, ImageType
-from .baseinvocation import BaseInvocation, InvocationContext, InvocationConfig
-from .image import ImageOutput, build_image_output
+from invokeai.app.models.image import ImageCategory, ImageField, ResourceOrigin
+
+from .baseinvocation import BaseInvocation, InvocationConfig, InvocationContext
+from .image import ImageOutput
+
+# TODO: Populate this from disk?
+# TODO: Use model manager to load?
+ESRGAN_MODELS = Literal[
+    "RealESRGAN_x4plus.pth",
+    "RealESRGAN_x4plus_anime_6B.pth",
+    "ESRGAN_SRx4_DF2KOST_official-ff704c30.pth",
+    "RealESRGAN_x2plus.pth",
+]
 
 
-class UpscaleInvocation(BaseInvocation):
-    """Upscales an image."""
-    #fmt: off
-    type: Literal["upscale"] = "upscale"
+class ESRGANInvocation(BaseInvocation):
+    """Upscales an image using RealESRGAN."""
 
-    # Inputs
-    image: Union[ImageField, None] = Field(description="The input image", default=None)
-    strength: float = Field(default=0.75, gt=0, le=1, description="The strength")
-    level: Literal[2, 4] = Field(default=2, description="The upscale level")
-    #fmt: on
+    type: Literal["esrgan"] = "esrgan"
+    image: Union[ImageField, None] = Field(default=None, description="The input image")
+    model_name: ESRGAN_MODELS = Field(default="RealESRGAN_x4plus.pth", description="The Real-ESRGAN model to use")
 
-
-    # Schema customisation
     class Config(InvocationConfig):
         schema_extra = {
-            "ui": {
-                "tags": ["upscaling", "image"],
-            },
+            "ui": {"title": "Upscale (RealESRGAN)", "tags": ["image", "upscale", "realesrgan"]},
         }
 
     def invoke(self, context: InvocationContext) -> ImageOutput:
-        image = context.services.images.get(
-            self.image.image_type, self.image.image_name
-        )
-        results = context.services.restoration.upscale_and_reconstruct(
-            image_list=[[image, 0]],
-            upscale=(self.level, self.strength),
-            strength=0.0,  # GFPGAN strength
-            save_original=False,
-            image_callback=None,
+        image = context.services.images.get_pil_image(self.image.image_name)
+        models_path = context.services.configuration.models_path
+
+        rrdbnet_model = None
+        netscale = None
+        esrgan_model_path = None
+
+        if self.model_name in [
+            "RealESRGAN_x4plus.pth",
+            "ESRGAN_SRx4_DF2KOST_official-ff704c30.pth",
+        ]:
+            # x4 RRDBNet model
+            rrdbnet_model = RRDBNet(
+                num_in_ch=3,
+                num_out_ch=3,
+                num_feat=64,
+                num_block=23,
+                num_grow_ch=32,
+                scale=4,
+            )
+            netscale = 4
+        elif self.model_name in ["RealESRGAN_x4plus_anime_6B.pth"]:
+            # x4 RRDBNet model, 6 blocks
+            rrdbnet_model = RRDBNet(
+                num_in_ch=3,
+                num_out_ch=3,
+                num_feat=64,
+                num_block=6,  # 6 blocks
+                num_grow_ch=32,
+                scale=4,
+            )
+            netscale = 4
+        elif self.model_name in ["RealESRGAN_x2plus.pth"]:
+            # x2 RRDBNet model
+            rrdbnet_model = RRDBNet(
+                num_in_ch=3,
+                num_out_ch=3,
+                num_feat=64,
+                num_block=23,
+                num_grow_ch=32,
+                scale=2,
+            )
+            netscale = 2
+        else:
+            msg = f"Invalid RealESRGAN model: {self.model_name}"
+            context.services.logger.error(msg)
+            raise ValueError(msg)
+
+        esrgan_model_path = Path(f"core/upscaling/realesrgan/{self.model_name}")
+
+        upsampler = RealESRGANer(
+            scale=netscale,
+            model_path=str(models_path / esrgan_model_path),
+            model=rrdbnet_model,
+            half=False,
         )
 
-        # Results are image and seed, unwrap for now
-        # TODO: can this return multiple results?
-        image_type = ImageType.RESULT
-        image_name = context.services.images.create_name(
-            context.graph_execution_state_id, self.id
+        # prepare image - Real-ESRGAN uses cv2 internally, and cv2 uses BGR vs RGB for PIL
+        cv_image = cv.cvtColor(np.array(image.convert("RGB")), cv.COLOR_RGB2BGR)
+
+        # We can pass an `outscale` value here, but it just resizes the image by that factor after
+        # upscaling, so it's kinda pointless for our purposes. If you want something other than 4x
+        # upscaling, you'll need to add a resize node after this one.
+        upscaled_image, img_mode = upsampler.enhance(cv_image)
+
+        # back to PIL
+        pil_image = Image.fromarray(cv.cvtColor(upscaled_image, cv.COLOR_BGR2RGB)).convert("RGBA")
+
+        image_dto = context.services.images.create(
+            image=pil_image,
+            image_origin=ResourceOrigin.INTERNAL,
+            image_category=ImageCategory.GENERAL,
+            node_id=self.id,
+            session_id=context.graph_execution_state_id,
+            is_intermediate=self.is_intermediate,
         )
 
-        metadata = context.services.metadata.build_metadata(
-            session_id=context.graph_execution_state_id, node=self
-        )
-
-        context.services.images.save(image_type, image_name, results[0][0], metadata)
-        return build_image_output(
-            image_type=image_type,
-            image_name=image_name,
-            image=results[0][0]
+        return ImageOutput(
+            image=ImageField(image_name=image_dto.image_name),
+            width=image_dto.width,
+            height=image_dto.height,
         )

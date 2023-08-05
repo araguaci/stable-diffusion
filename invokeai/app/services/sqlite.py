@@ -1,6 +1,6 @@
 import sqlite3
 from threading import Lock
-from typing import Generic, TypeVar, Union, get_args
+from typing import Generic, Optional, TypeVar, get_args
 
 from pydantic import BaseModel, parse_raw_as
 
@@ -26,7 +26,6 @@ class SqliteItemStorage(ItemStorageABC, Generic[T]):
         self._table_name = table_name
         self._id_field = id_field  # TODO: validate that T has this field
         self._lock = Lock()
-
         self._conn = sqlite3.connect(
             self._filename, check_same_thread=False
         )  # TODO: figure out a better threading solution
@@ -64,12 +63,10 @@ class SqliteItemStorage(ItemStorageABC, Generic[T]):
             self._lock.release()
         self._on_changed(item)
 
-    def get(self, id: str) -> Union[T, None]:
+    def get(self, id: str) -> Optional[T]:
         try:
             self._lock.acquire()
-            self._cursor.execute(
-                f"""SELECT item FROM {self._table_name} WHERE id = ?;""", (str(id),)
-            )
+            self._cursor.execute(f"""SELECT item FROM {self._table_name} WHERE id = ?;""", (str(id),))
             result = self._cursor.fetchone()
         finally:
             self._lock.release()
@@ -79,12 +76,23 @@ class SqliteItemStorage(ItemStorageABC, Generic[T]):
 
         return self._parse_item(result[0])
 
+    def get_raw(self, id: str) -> Optional[str]:
+        try:
+            self._lock.acquire()
+            self._cursor.execute(f"""SELECT item FROM {self._table_name} WHERE id = ?;""", (str(id),))
+            result = self._cursor.fetchone()
+        finally:
+            self._lock.release()
+
+        if not result:
+            return None
+
+        return result[0]
+
     def delete(self, id: str):
         try:
             self._lock.acquire()
-            self._cursor.execute(
-                f"""DELETE FROM {self._table_name} WHERE id = ?;""", (str(id),)
-            )
+            self._cursor.execute(f"""DELETE FROM {self._table_name} WHERE id = ?;""", (str(id),))
             self._conn.commit()
         finally:
             self._lock.release()
@@ -108,13 +116,9 @@ class SqliteItemStorage(ItemStorageABC, Generic[T]):
 
         pageCount = int(count / per_page) + 1
 
-        return PaginatedResults[T](
-            items=items, page=page, pages=pageCount, per_page=per_page, total=count
-        )
+        return PaginatedResults[T](items=items, page=page, pages=pageCount, per_page=per_page, total=count)
 
-    def search(
-        self, query: str, page: int = 0, per_page: int = 10
-    ) -> PaginatedResults[T]:
+    def search(self, query: str, page: int = 0, per_page: int = 10) -> PaginatedResults[T]:
         try:
             self._lock.acquire()
             self._cursor.execute(
@@ -135,6 +139,4 @@ class SqliteItemStorage(ItemStorageABC, Generic[T]):
 
         pageCount = int(count / per_page) + 1
 
-        return PaginatedResults[T](
-            items=items, page=page, pages=pageCount, per_page=per_page, total=count
-        )
+        return PaginatedResults[T](items=items, page=page, pages=pageCount, per_page=per_page, total=count)

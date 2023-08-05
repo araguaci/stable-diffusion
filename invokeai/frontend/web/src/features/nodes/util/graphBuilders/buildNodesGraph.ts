@@ -1,8 +1,9 @@
-import { Graph } from 'services/api';
-import { v4 as uuidv4 } from 'uuid';
-import { cloneDeep, reduce } from 'lodash-es';
 import { RootState } from 'app/store/store';
 import { InputFieldValue } from 'features/nodes/types/types';
+import { cloneDeep, omit, reduce } from 'lodash-es';
+import { Graph } from 'services/api/types';
+import { AnyInvocation } from 'services/events/types';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * We need to do special handling for some fields
@@ -32,9 +33,11 @@ export const parseFieldValue = (field: InputFieldValue) => {
 export const buildNodesGraph = (state: RootState): Graph => {
   const { nodes, edges } = state.nodes;
 
+  const filteredNodes = nodes.filter((n) => n.type !== 'progress_image');
+
   // Reduce the node editor nodes into invocation graph nodes
-  const parsedNodes = nodes.reduce<NonNullable<Graph['nodes']>>(
-    (nodesAccumulator, node, nodeIndex) => {
+  const parsedNodes = filteredNodes.reduce<NonNullable<Graph['nodes']>>(
+    (nodesAccumulator, node) => {
       const { id, data } = node;
       const { type, inputs } = data;
 
@@ -47,7 +50,7 @@ export const buildNodesGraph = (state: RootState): Graph => {
 
           return inputsAccumulator;
         },
-        {} as Record<Exclude<string, 'id' | 'type'>, any>
+        {} as Record<Exclude<string, 'id' | 'type'>, unknown>
       );
 
       // Build this specific node
@@ -69,7 +72,7 @@ export const buildNodesGraph = (state: RootState): Graph => {
 
   // Reduce the node editor edges into invocation graph edges
   const parsedEdges = edges.reduce<NonNullable<Graph['edges']>>(
-    (edgesAccumulator, edge, edgeIndex) => {
+    (edgesAccumulator, edge) => {
       const { source, target, sourceHandle, targetHandle } = edge;
 
       // Format the edges and add to the edges array
@@ -88,6 +91,24 @@ export const buildNodesGraph = (state: RootState): Graph => {
     },
     []
   );
+
+  /**
+   * Omit all inputs that have edges connected.
+   *
+   * Fixes edge case where the user has connected an input, but also provided an invalid explicit,
+   * value.
+   *
+   * In this edge case, pydantic will invalidate the node based on the invalid explicit value,
+   * even though the actual value that will be used comes from the connection.
+   */
+  parsedEdges.forEach((edge) => {
+    const destination_node = parsedNodes[edge.destination.node_id];
+    const field = edge.destination.field;
+    parsedNodes[edge.destination.node_id] = omit(
+      destination_node,
+      field
+    ) as AnyInvocation;
+  });
 
   // Assemble!
   const graph = {

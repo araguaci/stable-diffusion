@@ -1,29 +1,11 @@
 import { Badge, Flex } from '@chakra-ui/react';
-import { Image } from 'app/types/invokeai';
-import { isNumber, isString } from 'lodash-es';
-import { useMemo } from 'react';
+import { ImageDTO } from 'services/api/types';
 
 type ImageMetadataOverlayProps = {
-  image: Image;
+  imageDTO: ImageDTO;
 };
 
-const ImageMetadataOverlay = ({ image }: ImageMetadataOverlayProps) => {
-  const dimensions = useMemo(() => {
-    if (!isNumber(image.metadata?.width) || isNumber(!image.metadata?.height)) {
-      return;
-    }
-
-    return `${image.metadata?.width} × ${image.metadata?.height}`;
-  }, [image.metadata]);
-
-  const model = useMemo(() => {
-    if (!isString(image.metadata?.invokeai?.node?.model)) {
-      return;
-    }
-
-    return image.metadata?.invokeai?.node?.model;
-  }, [image.metadata]);
-
+const ImageMetadataOverlay = ({ imageDTO }: ImageMetadataOverlayProps) => {
   return (
     <Flex
       sx={{
@@ -31,22 +13,15 @@ const ImageMetadataOverlay = ({ image }: ImageMetadataOverlayProps) => {
         flexDirection: 'column',
         position: 'absolute',
         top: 0,
-        right: 0,
+        insetInlineStart: 0,
         p: 2,
-        alignItems: 'flex-end',
+        alignItems: 'flex-start',
         gap: 2,
       }}
     >
-      {dimensions && (
-        <Badge variant="solid" colorScheme="base">
-          {dimensions}
-        </Badge>
-      )}
-      {model && (
-        <Badge variant="solid" colorScheme="base">
-          {model}
-        </Badge>
-      )}
+      <Badge variant="solid" colorScheme="base">
+        {imageDTO.width} × {imageDTO.height}
+      </Badge>
     </Flex>
   );
 };

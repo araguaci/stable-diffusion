@@ -1,21 +1,48 @@
-import { Box, useToast } from '@chakra-ui/react';
-import { ImageUploaderTriggerContext } from 'app/contexts/ImageUploaderTriggerContext';
-import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
-import useImageUploader from 'common/hooks/useImageUploader';
+import { Box } from '@chakra-ui/react';
+import { createSelector } from '@reduxjs/toolkit';
+import { useAppToaster } from 'app/components/Toaster';
+import { useAppSelector } from 'app/store/storeHooks';
+import { defaultSelectorOptions } from 'app/store/util/defaultMemoizeOptions';
+import { selectIsBusy } from 'features/system/store/systemSelectors';
 import { activeTabNameSelector } from 'features/ui/store/uiSelectors';
-import { ResourceKey } from 'i18next';
 import {
   KeyboardEvent,
-  memo,
   ReactNode,
+  memo,
   useCallback,
   useEffect,
   useState,
 } from 'react';
 import { FileRejection, useDropzone } from 'react-dropzone';
 import { useTranslation } from 'react-i18next';
-import { imageUploaded } from 'services/thunks/image';
+import { useUploadImageMutation } from 'services/api/endpoints/images';
+import { PostUploadAction } from 'services/api/types';
 import ImageUploadOverlay from './ImageUploadOverlay';
+import { AnimatePresence, motion } from 'framer-motion';
+import { stateSelector } from 'app/store/store';
+
+const selector = createSelector(
+  [stateSelector, activeTabNameSelector],
+  ({ gallery }, activeTabName) => {
+    let postUploadAction: PostUploadAction = { type: 'TOAST' };
+
+    if (activeTabName === 'unifiedCanvas') {
+      postUploadAction = { type: 'SET_CANVAS_INITIAL_IMAGE' };
+    }
+
+    if (activeTabName === 'img2img') {
+      postUploadAction = { type: 'SET_INITIAL_IMAGE' };
+    }
+
+    const { autoAddBoardId } = gallery;
+
+    return {
+      autoAddBoardId,
+      postUploadAction,
+    };
+  },
+  defaultSelectorOptions
+);
 
 type ImageUploaderProps = {
   children: ReactNode;
@@ -23,39 +50,51 @@ type ImageUploaderProps = {
 
 const ImageUploader = (props: ImageUploaderProps) => {
   const { children } = props;
-  const dispatch = useAppDispatch();
-  const activeTabName = useAppSelector(activeTabNameSelector);
-  const toast = useToast({});
+  const { autoAddBoardId, postUploadAction } = useAppSelector(selector);
+  const isBusy = useAppSelector(selectIsBusy);
+  const toaster = useAppToaster();
   const { t } = useTranslation();
   const [isHandlingUpload, setIsHandlingUpload] = useState<boolean>(false);
-  const { setOpenUploader } = useImageUploader();
+
+  const [uploadImage] = useUploadImageMutation();
 
   const fileRejectionCallback = useCallback(
     (rejection: FileRejection) => {
       setIsHandlingUpload(true);
-      const msg = rejection.errors.reduce(
-        (acc: string, cur: { message: string }) => `${acc}\n${cur.message}`,
-        ''
-      );
-      toast({
+
+      toaster({
         title: t('toast.uploadFailed'),
-        description: msg,
+        description: rejection.errors.map((error) => error.message).join('\n'),
         status: 'error',
-        isClosable: true,
       });
     },
-    [t, toast]
+    [t, toaster]
   );
 
   const fileAcceptedCallback = useCallback(
     async (file: File) => {
-      dispatch(imageUploaded({ imageType: 'uploads', formData: { file } }));
+      uploadImage({
+        file,
+        image_category: 'user',
+        is_intermediate: false,
+        postUploadAction,
+        board_id: autoAddBoardId === 'none' ? undefined : autoAddBoardId,
+      });
     },
-    [dispatch]
+    [autoAddBoardId, postUploadAction, uploadImage]
   );
 
   const onDrop = useCallback(
     (acceptedFiles: Array<File>, fileRejections: Array<FileRejection>) => {
+      if (fileRejections.length > 1) {
+        toaster({
+          title: t('toast.uploadFailed'),
+          description: t('toast.uploadFailedInvalidUploadDesc'),
+          status: 'error',
+        });
+        return;
+      }
+
       fileRejections.forEach((rejection: FileRejection) => {
         fileRejectionCallback(rejection);
       });
@@ -64,7 +103,7 @@ const ImageUploader = (props: ImageUploaderProps) => {
         fileAcceptedCallback(file);
       });
     },
-    [fileAcceptedCallback, fileRejectionCallback]
+    [t, toaster, fileAcceptedCallback, fileRejectionCallback]
   );
 
   const {
@@ -73,92 +112,74 @@ const ImageUploader = (props: ImageUploaderProps) => {
     isDragAccept,
     isDragReject,
     isDragActive,
-    open,
+    inputRef,
   } = useDropzone({
     accept: { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg', '.png'] },
     noClick: true,
     onDrop,
     onDragOver: () => setIsHandlingUpload(true),
-    maxFiles: 1,
+    disabled: isBusy,
+    multiple: false,
   });
 
-  setOpenUploader(open);
-
   useEffect(() => {
-    const pasteImageListener = (e: ClipboardEvent) => {
-      const dataTransferItemList = e.clipboardData?.items;
-      if (!dataTransferItemList) return;
-
-      const imageItems: Array<DataTransferItem> = [];
-
-      for (const item of dataTransferItemList) {
-        if (
-          item.kind === 'file' &&
-          ['image/png', 'image/jpg'].includes(item.type)
-        ) {
-          imageItems.push(item);
-        }
-      }
-
-      if (!imageItems.length) return;
-
-      e.stopImmediatePropagation();
-
-      if (imageItems.length > 1) {
-        toast({
-          description: t('toast.uploadFailedMultipleImagesDesc'),
-          status: 'error',
-          isClosable: true,
-        });
+    // This is a hack to allow pasting images into the uploader
+    const handlePaste = async (e: ClipboardEvent) => {
+      if (!inputRef.current) {
         return;
       }
 
-      const file = imageItems[0].getAsFile();
-
-      if (!file) {
-        toast({
-          description: t('toast.uploadFailedUnableToLoadDesc'),
-          status: 'error',
-          isClosable: true,
-        });
-        return;
+      if (e.clipboardData?.files) {
+        // Set the files on the inputRef
+        inputRef.current.files = e.clipboardData.files;
+        // Dispatch the change event, dropzone catches this and we get to use its own validation
+        inputRef.current?.dispatchEvent(new Event('change', { bubbles: true }));
       }
-
-      dispatch(imageUploaded({ imageType: 'uploads', formData: { file } }));
     };
-    document.addEventListener('paste', pasteImageListener);
+
+    // Add the paste event listener
+    document.addEventListener('paste', handlePaste);
+
     return () => {
-      document.removeEventListener('paste', pasteImageListener);
+      document.removeEventListener('paste', handlePaste);
     };
-  }, [t, dispatch, toast, activeTabName]);
-
-  const overlaySecondaryText = ['img2img', 'unifiedCanvas'].includes(
-    activeTabName
-  )
-    ? ` to ${String(t(`common.${activeTabName}` as ResourceKey))}`
-    : ``;
+  }, [inputRef]);
 
   return (
-    <ImageUploaderTriggerContext.Provider value={open}>
-      <Box
-        {...getRootProps({ style: {} })}
-        onKeyDown={(e: KeyboardEvent) => {
-          // Bail out if user hits spacebar - do not open the uploader
-          if (e.key === ' ') return;
-        }}
-      >
-        <input {...getInputProps()} />
-        {children}
+    <Box
+      {...getRootProps({ style: {} })}
+      onKeyDown={(e: KeyboardEvent) => {
+        // Bail out if user hits spacebar - do not open the uploader
+        if (e.key === ' ') return;
+      }}
+    >
+      <input {...getInputProps()} />
+      {children}
+      <AnimatePresence>
         {isDragActive && isHandlingUpload && (
-          <ImageUploadOverlay
-            isDragAccept={isDragAccept}
-            isDragReject={isDragReject}
-            overlaySecondaryText={overlaySecondaryText}
-            setIsHandlingUpload={setIsHandlingUpload}
-          />
+          <motion.div
+            key="image-upload-overlay"
+            initial={{
+              opacity: 0,
+            }}
+            animate={{
+              opacity: 1,
+              transition: { duration: 0.1 },
+            }}
+            exit={{
+              opacity: 0,
+              transition: { duration: 0.1 },
+            }}
+          >
+            <ImageUploadOverlay
+              isDragAccept={isDragAccept}
+              isDragReject={isDragReject}
+              setIsHandlingUpload={setIsHandlingUpload}
+            />
+          </motion.div>
         )}
-      </Box>
-    </ImageUploaderTriggerContext.Provider>
+      </AnimatePresence>
+    </Box>
   );
 };
 

@@ -1,44 +1,65 @@
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { createSlice } from '@reduxjs/toolkit';
-import * as InvokeAI from 'app/types/invokeai';
-import promptToString from 'common/util/promptToString';
+import { roundToMultiple } from 'common/util/roundDownToMultiple';
+import { configChanged } from 'features/system/store/configSlice';
 import { clamp } from 'lodash-es';
-import { setAllParametersReducer } from './setAllParametersReducer';
+import { ImageDTO } from 'services/api/types';
+import { clipSkipMap } from '../types/constants';
+import {
+  CfgScaleParam,
+  HeightParam,
+  MainModelParam,
+  NegativePromptParam,
+  OnnxModelParam,
+  PositivePromptParam,
+  PrecisionParam,
+  SchedulerParam,
+  SeedParam,
+  StepsParam,
+  StrengthParam,
+  VaeModelParam,
+  WidthParam,
+  zMainModel,
+} from '../types/parameterSchemas';
 
 export interface GenerationState {
-  cfgScale: number;
-  height: number;
-  img2imgStrength: number;
+  cfgScale: CfgScaleParam;
+  height: HeightParam;
+  img2imgStrength: StrengthParam;
   infillMethod: string;
-  initialImage?: InvokeAI.Image; // can be an Image or url
+  initialImage?: { imageName: string; width: number; height: number };
   iterations: number;
-  maskPath: string;
   perlin: number;
-  prompt: string;
-  negativePrompt: string;
-  sampler: string;
+  positivePrompt: PositivePromptParam;
+  negativePrompt: NegativePromptParam;
+  scheduler: SchedulerParam;
   seamBlur: number;
   seamSize: number;
   seamSteps: number;
   seamStrength: number;
-  seed: number;
+  seed: SeedParam;
   seedWeights: string;
   shouldFitToWidthHeight: boolean;
   shouldGenerateVariations: boolean;
   shouldRandomizeSeed: boolean;
   shouldUseNoiseSettings: boolean;
-  steps: number;
+  steps: StepsParam;
   threshold: number;
   tileSize: number;
   variationAmount: number;
-  width: number;
+  width: WidthParam;
   shouldUseSymmetry: boolean;
   horizontalSymmetrySteps: number;
   verticalSymmetrySteps: number;
-  model: string;
-  shouldUseSeamless: boolean;
+  model: MainModelParam | OnnxModelParam | null;
+  vae: VaeModelParam | null;
+  vaePrecision: PrecisionParam;
   seamlessXAxis: boolean;
   seamlessYAxis: boolean;
+  clipSkip: number;
+  shouldUseCpuNoise: boolean;
+  shouldShowAdvancedOptions: boolean;
+  aspectRatio: number | null;
 }
 
 export const initialGenerationState: GenerationState = {
@@ -47,11 +68,10 @@ export const initialGenerationState: GenerationState = {
   img2imgStrength: 0.75,
   infillMethod: 'patchmatch',
   iterations: 1,
-  maskPath: '',
   perlin: 0,
-  prompt: '',
+  positivePrompt: '',
   negativePrompt: '',
-  sampler: 'lms',
+  scheduler: 'euler',
   seamBlur: 16,
   seamSize: 96,
   seamSteps: 30,
@@ -70,10 +90,15 @@ export const initialGenerationState: GenerationState = {
   shouldUseSymmetry: false,
   horizontalSymmetrySteps: 0,
   verticalSymmetrySteps: 0,
-  model: '',
-  shouldUseSeamless: false,
-  seamlessXAxis: true,
-  seamlessYAxis: true,
+  model: null,
+  vae: null,
+  vaePrecision: 'fp32',
+  seamlessXAxis: false,
+  seamlessYAxis: false,
+  clipSkip: 0,
+  shouldUseCpuNoise: true,
+  shouldShowAdvancedOptions: false,
+  aspectRatio: null,
 };
 
 const initialState: GenerationState = initialGenerationState;
@@ -82,24 +107,11 @@ export const generationSlice = createSlice({
   name: 'generation',
   initialState,
   reducers: {
-    setPrompt: (state, action: PayloadAction<string | InvokeAI.Prompt>) => {
-      const newPrompt = action.payload;
-      if (typeof newPrompt === 'string') {
-        state.prompt = newPrompt;
-      } else {
-        state.prompt = promptToString(newPrompt);
-      }
+    setPositivePrompt: (state, action: PayloadAction<string>) => {
+      state.positivePrompt = action.payload;
     },
-    setNegativePrompt: (
-      state,
-      action: PayloadAction<string | InvokeAI.Prompt>
-    ) => {
-      const newPrompt = action.payload;
-      if (typeof newPrompt === 'string') {
-        state.negativePrompt = newPrompt;
-      } else {
-        state.negativePrompt = promptToString(newPrompt);
-      }
+    setNegativePrompt: (state, action: PayloadAction<string>) => {
+      state.negativePrompt = action.payload;
     },
     setIterations: (state, action: PayloadAction<number>) => {
       state.iterations = action.payload;
@@ -134,8 +146,13 @@ export const generationSlice = createSlice({
     setWidth: (state, action: PayloadAction<number>) => {
       state.width = action.payload;
     },
-    setSampler: (state, action: PayloadAction<string>) => {
-      state.sampler = action.payload;
+    toggleSize: (state) => {
+      const [width, height] = [state.width, state.height];
+      state.width = height;
+      state.height = width;
+    },
+    setScheduler: (state, action: PayloadAction<SchedulerParam>) => {
+      state.scheduler = action.payload;
     },
     setSeed: (state, action: PayloadAction<number>) => {
       state.seed = action.payload;
@@ -143,12 +160,6 @@ export const generationSlice = createSlice({
     },
     setImg2imgStrength: (state, action: PayloadAction<number>) => {
       state.img2imgStrength = action.payload;
-    },
-    setMaskPath: (state, action: PayloadAction<string>) => {
-      state.maskPath = action.payload;
-    },
-    setSeamless: (state, action: PayloadAction<boolean>) => {
-      state.shouldUseSeamless = action.payload;
     },
     setSeamlessXAxis: (state, action: PayloadAction<boolean>) => {
       state.seamlessXAxis = action.payload;
@@ -162,19 +173,6 @@ export const generationSlice = createSlice({
     resetSeed: (state) => {
       state.seed = -1;
     },
-    setParameter: (
-      state,
-      action: PayloadAction<{ key: string; value: string | number | boolean }>
-    ) => {
-      // TODO: This probably needs to be refactored.
-      // TODO: This probably also needs to be fixed after the reorg.
-      const { key, value } = action.payload;
-      const temp = { ...state, [key]: value };
-      if (key === 'seed') {
-        temp.shouldRandomizeSeed = false;
-      }
-      return temp;
-    },
     setShouldGenerateVariations: (state, action: PayloadAction<boolean>) => {
       state.shouldGenerateVariations = action.payload;
     },
@@ -186,7 +184,6 @@ export const generationSlice = createSlice({
       state.shouldGenerateVariations = true;
       state.variationAmount = 0;
     },
-    allParametersSet: setAllParametersReducer,
     resetParametersState: (state) => {
       return {
         ...state,
@@ -229,12 +226,73 @@ export const generationSlice = createSlice({
     setShouldUseNoiseSettings: (state, action: PayloadAction<boolean>) => {
       state.shouldUseNoiseSettings = action.payload;
     },
-    initialImageChanged: (state, action: PayloadAction<InvokeAI.Image>) => {
-      state.initialImage = action.payload;
+    initialImageChanged: (state, action: PayloadAction<ImageDTO>) => {
+      const { image_name, width, height } = action.payload;
+      state.initialImage = { imageName: image_name, width, height };
     },
-    modelSelected: (state, action: PayloadAction<string>) => {
+    modelChanged: (
+      state,
+      action: PayloadAction<MainModelParam | OnnxModelParam | null>
+    ) => {
       state.model = action.payload;
+
+      if (state.model === null) {
+        return;
+      }
+
+      // Clamp ClipSkip Based On Selected Model
+      const { maxClip } = clipSkipMap[state.model.base_model];
+      state.clipSkip = clamp(state.clipSkip, 0, maxClip);
     },
+    vaeSelected: (state, action: PayloadAction<VaeModelParam | null>) => {
+      // null is a valid VAE!
+      state.vae = action.payload;
+    },
+    vaePrecisionChanged: (state, action: PayloadAction<PrecisionParam>) => {
+      state.vaePrecision = action.payload;
+    },
+    setClipSkip: (state, action: PayloadAction<number>) => {
+      state.clipSkip = action.payload;
+    },
+    shouldUseCpuNoiseChanged: (state, action: PayloadAction<boolean>) => {
+      state.shouldUseCpuNoise = action.payload;
+    },
+    setShouldShowAdvancedOptions: (state, action: PayloadAction<boolean>) => {
+      state.shouldShowAdvancedOptions = action.payload;
+      if (!action.payload) {
+        state.clipSkip = 0;
+      }
+    },
+    setAspectRatio: (state, action: PayloadAction<number | null>) => {
+      const newAspectRatio = action.payload;
+      state.aspectRatio = newAspectRatio;
+      if (newAspectRatio) {
+        state.height = roundToMultiple(state.width / newAspectRatio, 8);
+      }
+    },
+  },
+  extraReducers: (builder) => {
+    builder.addCase(configChanged, (state, action) => {
+      const defaultModel = action.payload.sd?.defaultModel;
+
+      if (defaultModel && !state.model) {
+        const [base_model, model_type, model_name] = defaultModel.split('/');
+
+        const result = zMainModel.safeParse({
+          model_name,
+          base_model,
+          model_type,
+        });
+
+        if (result.success) {
+          state.model = result.data;
+        }
+      }
+    });
+    builder.addCase(setShouldShowAdvancedOptions, (state, action) => {
+      const advancedOptionsStatus = action.payload;
+      if (!advancedOptionsStatus) state.clipSkip = 0;
+    });
   },
 });
 
@@ -244,17 +302,16 @@ export const {
   resetParametersState,
   resetSeed,
   setCfgScale,
+  setWidth,
   setHeight,
+  toggleSize,
   setImg2imgStrength,
   setInfillMethod,
-  // setInitialImage,
   setIterations,
-  setMaskPath,
-  setParameter,
   setPerlin,
-  setPrompt,
+  setPositivePrompt,
   setNegativePrompt,
-  setSampler,
+  setScheduler,
   setSeamBlur,
   setSeamSize,
   setSeamSteps,
@@ -268,17 +325,20 @@ export const {
   setThreshold,
   setTileSize,
   setVariationAmount,
-  setWidth,
   setShouldUseSymmetry,
   setHorizontalSymmetrySteps,
   setVerticalSymmetrySteps,
   initialImageChanged,
-  modelSelected,
+  modelChanged,
+  vaeSelected,
   setShouldUseNoiseSettings,
-  setSeamless,
   setSeamlessXAxis,
   setSeamlessYAxis,
-  allParametersSet,
+  setClipSkip,
+  shouldUseCpuNoiseChanged,
+  setShouldShowAdvancedOptions,
+  setAspectRatio,
+  vaePrecisionChanged,
 } = generationSlice.actions;
 
 export default generationSlice.reducer;

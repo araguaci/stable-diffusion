@@ -1,17 +1,19 @@
-import { Box, Image } from '@chakra-ui/react';
+import { Flex } from '@chakra-ui/react';
+import { skipToken } from '@reduxjs/toolkit/dist/query';
+import {
+  TypesafeDraggableData,
+  TypesafeDroppableData,
+} from 'app/components/ImageDnd/typesafeDnd';
 import { useAppDispatch } from 'app/store/storeHooks';
-import SelectImagePlaceholder from 'common/components/SelectImagePlaceholder';
-import { useGetUrl } from 'common/util/getUrl';
-import useGetImageByNameAndType from 'features/gallery/hooks/useGetImageByName';
-
+import IAIDndImage from 'common/components/IAIDndImage';
 import { fieldValueChanged } from 'features/nodes/store/nodesSlice';
 import {
   ImageInputFieldTemplate,
   ImageInputFieldValue,
 } from 'features/nodes/types/types';
-import { DragEvent, memo, useCallback, useState } from 'react';
-
-import { ImageType } from 'services/api';
+import { memo, useCallback, useMemo } from 'react';
+import { useGetImageDTOQuery } from 'services/api/endpoints/images';
+import { PostUploadAction } from 'services/api/types';
 import { FieldComponentProps } from './types';
 
 const ImageInputFieldComponent = (
@@ -19,46 +21,67 @@ const ImageInputFieldComponent = (
 ) => {
   const { nodeId, field } = props;
 
-  const getImageByNameAndType = useGetImageByNameAndType();
   const dispatch = useAppDispatch();
-  const [url, setUrl] = useState<string>();
-  const { getUrl } = useGetUrl();
 
-  const handleDrop = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      const name = e.dataTransfer.getData('invokeai/imageName');
-      const type = e.dataTransfer.getData('invokeai/imageType') as ImageType;
+  const { currentData: imageDTO } = useGetImageDTOQuery(
+    field.value?.image_name ?? skipToken
+  );
 
-      if (!name || !type) {
-        return;
-      }
+  const handleReset = useCallback(() => {
+    dispatch(
+      fieldValueChanged({
+        nodeId,
+        fieldName: field.name,
+        value: undefined,
+      })
+    );
+  }, [dispatch, field.name, nodeId]);
 
-      const image = getImageByNameAndType(name, type);
+  const draggableData = useMemo<TypesafeDraggableData | undefined>(() => {
+    if (imageDTO) {
+      return {
+        id: `node-${nodeId}-${field.name}`,
+        payloadType: 'IMAGE_DTO',
+        payload: { imageDTO },
+      };
+    }
+  }, [field.name, imageDTO, nodeId]);
 
-      if (!image) {
-        return;
-      }
+  const droppableData = useMemo<TypesafeDroppableData | undefined>(
+    () => ({
+      id: `node-${nodeId}-${field.name}`,
+      actionType: 'SET_NODES_IMAGE',
+      context: { nodeId, fieldName: field.name },
+    }),
+    [field.name, nodeId]
+  );
 
-      setUrl(image.url);
-
-      dispatch(
-        fieldValueChanged({
-          nodeId,
-          fieldName: field.name,
-          value: {
-            image_name: name,
-            image_type: type,
-          },
-        })
-      );
-    },
-    [getImageByNameAndType, dispatch, field.name, nodeId]
+  const postUploadAction = useMemo<PostUploadAction>(
+    () => ({
+      type: 'SET_NODES_IMAGE',
+      nodeId,
+      fieldName: field.name,
+    }),
+    [nodeId, field.name]
   );
 
   return (
-    <Box onDrop={handleDrop}>
-      <Image src={getUrl(url)} fallback={<SelectImagePlaceholder />} />
-    </Box>
+    <Flex
+      sx={{
+        w: 'full',
+        h: 'full',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <IAIDndImage
+        imageDTO={imageDTO}
+        droppableData={droppableData}
+        draggableData={draggableData}
+        onClickReset={handleReset}
+        postUploadAction={postUploadAction}
+      />
+    </Flex>
   );
 };
 

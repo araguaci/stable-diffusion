@@ -1,5 +1,12 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { OpenAPIV3 } from 'openapi-types';
+import {
+  ControlNetModelParam,
+  LoRAModelParam,
+  MainModelParam,
+  VaeModelParam,
+} from 'features/parameters/types/parameterSchemas';
+import { cloneDeep, uniqBy } from 'lodash-es';
+import { RgbaColor } from 'react-colorful';
 import {
   addEdge,
   applyEdgeChanges,
@@ -11,23 +18,10 @@ import {
   NodeChange,
   OnConnectStartParams,
 } from 'reactflow';
-import { ImageField } from 'services/api';
-import { receivedOpenAPISchema } from 'services/thunks/schema';
+import { receivedOpenAPISchema } from 'services/api/thunks/schema';
+import { ImageField } from 'services/api/types';
 import { InvocationTemplate, InvocationValue } from '../types/types';
-import { parseSchema } from '../util/parseSchema';
-import { log } from 'app/logging/useLogger';
-import { size } from 'lodash-es';
-import { isAnyGraphBuilt } from './actions';
-import { RgbaColor } from 'react-colorful';
-
-export type NodesState = {
-  nodes: Node<InvocationValue>[];
-  edges: Edge[];
-  schema: OpenAPIV3.Document | null;
-  invocationTemplates: Record<string, InvocationTemplate>;
-  connectionStartParams: OnConnectStartParams | null;
-  shouldShowGraphOverlay: boolean;
-};
+import { NodesState } from './types';
 
 export const initialNodesState: NodesState = {
   nodes: [],
@@ -36,6 +30,10 @@ export const initialNodesState: NodesState = {
   invocationTemplates: {},
   connectionStartParams: null,
   shouldShowGraphOverlay: false,
+  shouldShowFieldTypeLegend: false,
+  shouldShowMinimapPanel: true,
+  editorInstance: undefined,
+  progressNodeSize: { width: 512, height: 512 },
 };
 
 const nodesSlice = createSlice({
@@ -69,44 +67,99 @@ const nodesSlice = createSlice({
           | string
           | number
           | boolean
-          | Pick<ImageField, 'image_name' | 'image_type'>
+          | ImageField
           | RgbaColor
-          | undefined;
+          | undefined
+          | ImageField[]
+          | MainModelParam
+          | VaeModelParam
+          | LoRAModelParam
+          | ControlNetModelParam;
+      }>
+    ) => {
+      const { nodeId, fieldName, value } = action.payload;
+      const nodeIndex = state.nodes.findIndex((n) => n.id === nodeId);
+      const input = state.nodes?.[nodeIndex]?.data?.inputs[fieldName];
+      if (!input) {
+        return;
+      }
+      if (nodeIndex > -1) {
+        input.value = value;
+      }
+    },
+    imageCollectionFieldValueChanged: (
+      state,
+      action: PayloadAction<{
+        nodeId: string;
+        fieldName: string;
+        value: ImageField[];
       }>
     ) => {
       const { nodeId, fieldName, value } = action.payload;
       const nodeIndex = state.nodes.findIndex((n) => n.id === nodeId);
 
-      if (nodeIndex > -1) {
-        state.nodes[nodeIndex].data.inputs[fieldName].value = value;
+      if (nodeIndex === -1) {
+        return;
       }
+
+      const input = state.nodes?.[nodeIndex]?.data?.inputs[fieldName];
+      if (!input) {
+        return;
+      }
+
+      const currentValue = cloneDeep(input.value);
+
+      if (!currentValue) {
+        input.value = value;
+        return;
+      }
+
+      input.value = uniqBy(
+        (currentValue as ImageField[]).concat(value),
+        'image_name'
+      );
     },
     shouldShowGraphOverlayChanged: (state, action: PayloadAction<boolean>) => {
       state.shouldShowGraphOverlay = action.payload;
     },
-    parsedOpenAPISchema: (state, action: PayloadAction<OpenAPIV3.Document>) => {
-      try {
-        const parsedSchema = parseSchema(action.payload);
-
-        // TODO: Achtung! Side effect in a reducer!
-        log.info(
-          { namespace: 'schema', nodes: parsedSchema },
-          `Parsed ${size(parsedSchema)} nodes`
-        );
-        state.invocationTemplates = parsedSchema;
-      } catch (err) {
-        console.error(err);
-      }
+    shouldShowFieldTypeLegendChanged: (
+      state,
+      action: PayloadAction<boolean>
+    ) => {
+      state.shouldShowFieldTypeLegend = action.payload;
+    },
+    shouldShowMinimapPanelChanged: (state, action: PayloadAction<boolean>) => {
+      state.shouldShowMinimapPanel = action.payload;
+    },
+    nodeTemplatesBuilt: (
+      state,
+      action: PayloadAction<Record<string, InvocationTemplate>>
+    ) => {
+      state.invocationTemplates = action.payload;
+    },
+    nodeEditorReset: (state) => {
+      state.nodes = [];
+      state.edges = [];
+    },
+    setEditorInstance: (state, action) => {
+      state.editorInstance = action.payload;
+    },
+    loadFileNodes: (state, action: PayloadAction<Node<InvocationValue>[]>) => {
+      state.nodes = action.payload;
+    },
+    loadFileEdges: (state, action: PayloadAction<Edge[]>) => {
+      state.edges = action.payload;
+    },
+    setProgressNodeSize: (
+      state,
+      action: PayloadAction<{ width: number; height: number }>
+    ) => {
+      state.progressNodeSize = action.payload;
     },
   },
-  extraReducers(builder) {
+  extraReducers: (builder) => {
     builder.addCase(receivedOpenAPISchema.fulfilled, (state, action) => {
       state.schema = action.payload;
-    });
-
-    builder.addMatcher(isAnyGraphBuilt, (state, action) => {
-      // TODO: Achtung! Side effect in a reducer!
-      log.info({ namespace: 'nodes', data: action.payload }, 'Graph built');
     });
   },
 });
@@ -120,7 +173,15 @@ export const {
   connectionStarted,
   connectionEnded,
   shouldShowGraphOverlayChanged,
-  parsedOpenAPISchema,
+  shouldShowFieldTypeLegendChanged,
+  shouldShowMinimapPanelChanged,
+  nodeTemplatesBuilt,
+  nodeEditorReset,
+  imageCollectionFieldValueChanged,
+  setEditorInstance,
+  loadFileNodes,
+  loadFileEdges,
+  setProgressNodeSize,
 } = nodesSlice.actions;
 
 export default nodesSlice.reducer;

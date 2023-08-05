@@ -139,7 +139,7 @@ const IAICanvasToolChooserOptions = () => {
   );
 
   useHotkeys(
-    ['shift+BracketLeft'],
+    ['Shift+BracketLeft'],
     () => {
       dispatch(
         setBrushColor({
@@ -156,7 +156,7 @@ const IAICanvasToolChooserOptions = () => {
   );
 
   useHotkeys(
-    ['shift+BracketRight'],
+    ['Shift+BracketRight'],
     () => {
       dispatch(
         setBrushColor({
@@ -235,7 +235,6 @@ const IAICanvasToolChooserOptions = () => {
               withInput
               onChange={(newSize) => dispatch(setBrushSize(newSize))}
               sliderNumberInputProps={{ max: 500 }}
-              inputReadOnly={false}
             />
           </Flex>
           <IAIColorPicker

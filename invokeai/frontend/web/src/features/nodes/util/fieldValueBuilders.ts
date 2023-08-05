@@ -44,6 +44,10 @@ export const buildInputFieldValue = (
       fieldValue.value = undefined;
     }
 
+    if (template.type === 'image_collection') {
+      fieldValue.value = [];
+    }
+
     if (template.type === 'latents') {
       fieldValue.value = undefined;
     }
@@ -52,7 +56,39 @@ export const buildInputFieldValue = (
       fieldValue.value = undefined;
     }
 
+    if (template.type === 'unet') {
+      fieldValue.value = undefined;
+    }
+
+    if (template.type === 'clip') {
+      fieldValue.value = undefined;
+    }
+
+    if (template.type === 'vae') {
+      fieldValue.value = undefined;
+    }
+
+    if (template.type === 'control') {
+      fieldValue.value = undefined;
+    }
+
     if (template.type === 'model') {
+      fieldValue.value = undefined;
+    }
+
+    if (template.type === 'refiner_model') {
+      fieldValue.value = undefined;
+    }
+
+    if (template.type === 'vae_model') {
+      fieldValue.value = undefined;
+    }
+
+    if (template.type === 'lora_model') {
+      fieldValue.value = undefined;
+    }
+
+    if (template.type === 'controlnet_model') {
       fieldValue.value = undefined;
     }
   }

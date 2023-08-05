@@ -21,13 +21,14 @@ from npyscreen import widget
 from omegaconf import OmegaConf
 
 import invokeai.backend.util.logging as logger
-from invokeai.backend.globals import Globals, global_set_root
 
+from invokeai.app.services.config import InvokeAIAppConfig
 from ...backend.training import do_textual_inversion_training, parse_args
 
 TRAINING_DATA = "text-inversion-training-data"
 TRAINING_DIR = "text-inversion-output"
 CONF_FILE = "preferences.conf"
+config = None
 
 
 class textualInversionForm(npyscreen.FormMultiPageAction):
@@ -108,9 +109,7 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
             npyscreen.TitleSelectOne,
             name="Learnable property:",
             values=self.learnable_properties,
-            value=self.learnable_properties.index(
-                saved_args.get("learnable_property", "object")
-            ),
+            value=self.learnable_properties.index(saved_args.get("learnable_property", "object")),
             max_height=4,
             scroll_exit=True,
         )
@@ -122,7 +121,7 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
             value=str(
                 saved_args.get(
                     "train_data_dir",
-                    Path(Globals.root) / TRAINING_DATA / default_placeholder_token,
+                    config.root_dir / TRAINING_DATA / default_placeholder_token,
                 )
             ),
             scroll_exit=True,
@@ -135,7 +134,7 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
             value=str(
                 saved_args.get(
                     "output_dir",
-                    Path(Globals.root) / TRAINING_DIR / default_placeholder_token,
+                    config.root_dir / TRAINING_DIR / default_placeholder_token,
                 )
             ),
             scroll_exit=True,
@@ -240,10 +239,8 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
     def initializer_changed(self):
         placeholder = self.placeholder_token.value
         self.prompt_token.value = f"(Trigger by using <{placeholder}> in your prompts)"
-        self.train_data_dir.value = str(
-            Path(Globals.root) / TRAINING_DATA / placeholder
-        )
-        self.output_dir.value = str(Path(Globals.root) / TRAINING_DIR / placeholder)
+        self.train_data_dir.value = str(config.root_dir / TRAINING_DATA / placeholder)
+        self.output_dir.value = str(config.root_dir / TRAINING_DIR / placeholder)
         self.resume_from_checkpoint.value = Path(self.output_dir.value).exists()
 
     def on_ok(self):
@@ -251,9 +248,7 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
             self.parentApp.setNextForm(None)
             self.editing = False
             self.parentApp.ti_arguments = self.marshall_arguments()
-            npyscreen.notify(
-                "Launching textual inversion training. This will take a while..."
-            )
+            npyscreen.notify("Launching textual inversion training. This will take a while...")
         else:
             self.editing = True
 
@@ -263,13 +258,9 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
     def validate_field_values(self) -> bool:
         bad_fields = []
         if self.model.value is None:
-            bad_fields.append(
-                "Model Name must correspond to a known model in models.yaml"
-            )
+            bad_fields.append("Model Name must correspond to a known model in models.yaml")
         if not re.match("^[a-zA-Z0-9.-]+$", self.placeholder_token.value):
-            bad_fields.append(
-                "Trigger term must only contain alphanumeric characters, the dot and hyphen"
-            )
+            bad_fields.append("Trigger term must only contain alphanumeric characters, the dot and hyphen")
         if self.train_data_dir.value is None:
             bad_fields.append("Data Training Directory cannot be empty")
         if self.output_dir.value is None:
@@ -284,17 +275,9 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
             return True
 
     def get_model_names(self) -> Tuple[List[str], int]:
-        conf = OmegaConf.load(os.path.join(Globals.root, "configs/models.yaml"))
-        model_names = [
-            idx
-            for idx in sorted(list(conf.keys()))
-            if conf[idx].get("format", None) == "diffusers"
-        ]
-        defaults = [
-            idx
-            for idx in range(len(model_names))
-            if "default" in conf[model_names[idx]]
-        ]
+        conf = OmegaConf.load(config.root_dir / "configs/models.yaml")
+        model_names = [idx for idx in sorted(list(conf.keys())) if conf[idx].get("format", None) == "diffusers"]
+        defaults = [idx for idx in range(len(model_names)) if "default" in conf[model_names[idx]]]
         default = defaults[0] if len(defaults) > 0 else 0
         return (model_names, default)
 
@@ -307,9 +290,7 @@ class textualInversionForm(npyscreen.FormMultiPageAction):
             resolution=self.resolutions[self.resolution.value[0]],
             lr_scheduler=self.lr_schedulers[self.lr_scheduler.value[0]],
             mixed_precision=self.precisions[self.mixed_precision.value[0]],
-            learnable_property=self.learnable_properties[
-                self.learnable_property.value[0]
-            ],
+            learnable_property=self.learnable_properties[self.learnable_property.value[0]],
         )
 
         # all the strings and booleans
@@ -367,13 +348,11 @@ def copy_to_embeddings_folder(args: dict):
     """
     source = Path(args["output_dir"], "learned_embeds.bin")
     dest_dir_name = args["placeholder_token"].strip("<>")
-    destination = Path(Globals.root, "embeddings", dest_dir_name)
+    destination = config.root_dir / "embeddings" / dest_dir_name
     os.makedirs(destination, exist_ok=True)
     logger.info(f"Training completed. Copying learned_embeds.bin into {str(destination)}")
     shutil.copy(source, destination)
-    if (
-        input("Delete training logs and intermediate checkpoints? [y] ") or "y"
-    ).startswith(("y", "Y")):
+    if (input("Delete training logs and intermediate checkpoints? [y] ") or "y").startswith(("y", "Y")):
         shutil.rmtree(Path(args["output_dir"]))
     else:
         logger.info(f'Keeping {args["output_dir"]}')
@@ -383,7 +362,7 @@ def save_args(args: dict):
     """
     Save the current argument values to an omegaconf file
     """
-    dest_dir = Path(Globals.root) / TRAINING_DIR
+    dest_dir = config.root_dir / TRAINING_DIR
     os.makedirs(dest_dir, exist_ok=True)
     conf_file = dest_dir / CONF_FILE
     conf = OmegaConf.create(args)
@@ -394,7 +373,7 @@ def previous_args() -> dict:
     """
     Get the previous arguments used.
     """
-    conf_file = Path(Globals.root) / TRAINING_DIR / CONF_FILE
+    conf_file = config.root_dir / TRAINING_DIR / CONF_FILE
     try:
         conf = OmegaConf.load(conf_file)
         conf["placeholder_token"] = conf["placeholder_token"].strip("<>")
@@ -420,7 +399,7 @@ def do_front_end(args: Namespace):
         save_args(args)
 
         try:
-            do_textual_inversion_training(**args)
+            do_textual_inversion_training(InvokeAIAppConfig.get_config(), **args)
             copy_to_embeddings_folder(args)
         except Exception as e:
             logger.error("An exception occurred during training. The exception was:")
@@ -430,13 +409,20 @@ def do_front_end(args: Namespace):
 
 
 def main():
+    global config
+
     args = parse_args()
-    global_set_root(args.root_dir or Globals.root)
+    config = InvokeAIAppConfig.get_config()
+
+    # change root if needed
+    if args.root_dir:
+        config.root = args.root_dir
+
     try:
         if args.front_end:
             do_front_end(args)
         else:
-            do_textual_inversion_training(**vars(args))
+            do_textual_inversion_training(config, **vars(args))
     except AssertionError as e:
         logger.error(e)
         sys.exit(-1)
@@ -444,13 +430,9 @@ def main():
         pass
     except (widget.NotEnoughSpaceForWidget, Exception) as e:
         if str(e).startswith("Height of 1 allocated"):
-            logger.error(
-                "You need to have at least one diffusers models defined in models.yaml in order to train"
-            )
+            logger.error("You need to have at least one diffusers models defined in models.yaml in order to train")
         elif str(e).startswith("addwstr"):
-            logger.error(
-                "Not enough window space for the interface. Please make your window larger and try again."
-            )
+            logger.error("Not enough window space for the interface. Please make your window larger and try again.")
         else:
             logger.error(e)
         sys.exit(-1)

@@ -1,39 +1,71 @@
 # Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
 
 import argparse
-import os
 import re
 import shlex
+import sys
 import time
-from typing import (
-    Union,
-    get_type_hints,
-)
+from typing import Union, get_type_hints, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from pydantic.fields import Field
 
+# This should come early so that the logger can pick up its configuration options
+from .services.config import InvokeAIAppConfig
+from invokeai.backend.util.logging import InvokeAILogger
 
-import invokeai.backend.util.logging as logger
-from invokeai.app.services.metadata import PngMetadataService
-from .services.default_graphs import create_system_graphs
+config = InvokeAIAppConfig.get_config()
+config.parse_args()
+logger = InvokeAILogger().getLogger(config=config)
+from invokeai.version.invokeai_version import __version__
+
+# we call this early so that the message appears before other invokeai initialization messages
+if config.version:
+    print(f"InvokeAI version {__version__}")
+    sys.exit(0)
+
+from invokeai.app.services.board_image_record_storage import (
+    SqliteBoardImageRecordStorage,
+)
+from invokeai.app.services.board_images import (
+    BoardImagesService,
+    BoardImagesServiceDependencies,
+)
+from invokeai.app.services.board_record_storage import SqliteBoardRecordStorage
+from invokeai.app.services.boards import BoardService, BoardServiceDependencies
+from invokeai.app.services.image_record_storage import SqliteImageRecordStorage
+from invokeai.app.services.images import ImageService, ImageServiceDependencies
+from invokeai.app.services.resource_name import SimpleNameService
+from invokeai.app.services.urls import LocalUrlService
+from invokeai.app.services.invocation_stats import InvocationStatsService
+from .services.default_graphs import default_text_to_image_graph_id, create_system_graphs
 from .services.latent_storage import DiskLatentsStorage, ForwardCacheLatentsStorage
 
-from ..backend import Args
-from .cli.commands import BaseCommand, CliContext, ExitCli, add_graph_parsers, add_parsers
+from .cli.commands import BaseCommand, CliContext, ExitCli, SortedHelpFormatter, add_graph_parsers, add_parsers
 from .cli.completer import set_autocompleter
 from .invocations.baseinvocation import BaseInvocation
 from .services.events import EventServiceBase
-from .services.model_manager_initializer import get_model_manager
-from .services.restoration_services import RestorationServices
-from .services.graph import Edge, EdgeConnection, GraphExecutionState, GraphInvocation, LibraryGraph, are_connection_types_compatible
-from .services.default_graphs import default_text_to_image_graph_id
-from .services.image_storage import DiskImageStorage
+from .services.graph import (
+    Edge,
+    EdgeConnection,
+    GraphExecutionState,
+    GraphInvocation,
+    LibraryGraph,
+    are_connection_types_compatible,
+)
+from .services.image_file_storage import DiskImageFileStorage
 from .services.invocation_queue import MemoryInvocationQueue
 from .services.invocation_services import InvocationServices
 from .services.invoker import Invoker
+from .services.model_manager_service import ModelManagerService
 from .services.processor import DefaultInvocationProcessor
 from .services.sqlite import SqliteItemStorage
+
+import torch
+import invokeai.backend.util.hotfixes
+
+if torch.backends.mps.is_available():
+    import invokeai.backend.util.mps_fixes
 
 
 class CliCommand(BaseModel):
@@ -64,7 +96,7 @@ def add_invocation_args(command_parser):
 
 def get_command_parser(services: InvocationServices) -> argparse.ArgumentParser:
     # Create invocation parser
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=SortedHelpFormatter)
 
     def exit(*args, **kwargs):
         raise InvalidArgs
@@ -88,7 +120,7 @@ def get_command_parser(services: InvocationServices) -> argparse.ArgumentParser:
     return parser
 
 
-class NodeField():
+class NodeField:
     alias: str
     node_path: str
     field: str
@@ -101,15 +133,20 @@ class NodeField():
         self.field_type = field_type
 
 
-def fields_from_type_hints(hints: dict[str, type], node_path: str) -> dict[str,NodeField]:
-    return {k:NodeField(alias=k, node_path=node_path, field=k, field_type=v) for k, v in hints.items()}
+def fields_from_type_hints(hints: dict[str, type], node_path: str) -> dict[str, NodeField]:
+    return {k: NodeField(alias=k, node_path=node_path, field=k, field_type=v) for k, v in hints.items()}
 
 
 def get_node_input_field(graph: LibraryGraph, field_alias: str, node_id: str) -> NodeField:
     """Gets the node field for the specified field alias"""
     exposed_input = next(e for e in graph.exposed_inputs if e.alias == field_alias)
     node_type = type(graph.graph.get_node(exposed_input.node_path))
-    return NodeField(alias=exposed_input.alias, node_path=f'{node_id}.{exposed_input.node_path}', field=exposed_input.field, field_type=get_type_hints(node_type)[exposed_input.field])
+    return NodeField(
+        alias=exposed_input.alias,
+        node_path=f"{node_id}.{exposed_input.node_path}",
+        field=exposed_input.field,
+        field_type=get_type_hints(node_type)[exposed_input.field],
+    )
 
 
 def get_node_output_field(graph: LibraryGraph, field_alias: str, node_id: str) -> NodeField:
@@ -117,7 +154,12 @@ def get_node_output_field(graph: LibraryGraph, field_alias: str, node_id: str) -
     exposed_output = next(e for e in graph.exposed_outputs if e.alias == field_alias)
     node_type = type(graph.graph.get_node(exposed_output.node_path))
     node_output_type = node_type.get_output_type()
-    return NodeField(alias=exposed_output.alias, node_path=f'{node_id}.{exposed_output.node_path}', field=exposed_output.field, field_type=get_type_hints(node_output_type)[exposed_output.field])
+    return NodeField(
+        alias=exposed_output.alias,
+        node_path=f"{node_id}.{exposed_output.node_path}",
+        field=exposed_output.field,
+        field_type=get_type_hints(node_output_type)[exposed_output.field],
+    )
 
 
 def get_node_inputs(invocation: BaseInvocation, context: CliContext) -> dict[str, NodeField]:
@@ -140,9 +182,7 @@ def get_node_outputs(invocation: BaseInvocation, context: CliContext) -> dict[st
         return {e.alias: get_node_output_field(graph, e.alias, invocation.id) for e in graph.exposed_outputs}
 
 
-def generate_matching_edges(
-    a: BaseInvocation, b: BaseInvocation, context: CliContext
-) -> list[Edge]:
+def generate_matching_edges(a: BaseInvocation, b: BaseInvocation, context: CliContext) -> list[Edge]:
     """Generates all possible edges between two invocations"""
     afields = get_node_outputs(a, context)
     bfields = get_node_inputs(b, context)
@@ -154,12 +194,14 @@ def generate_matching_edges(
     matching_fields = matching_fields.difference(invalid_fields)
 
     # Validate types
-    matching_fields = [f for f in matching_fields if are_connection_types_compatible(afields[f].field_type, bfields[f].field_type)]
+    matching_fields = [
+        f for f in matching_fields if are_connection_types_compatible(afields[f].field_type, bfields[f].field_type)
+    ]
 
     edges = [
         Edge(
             source=EdgeConnection(node_id=afields[alias].node_path, field=afields[alias].field),
-            destination=EdgeConnection(node_id=bfields[alias].node_path, field=bfields[alias].field)
+            destination=EdgeConnection(node_id=bfields[alias].node_path, field=bfields[alias].field),
         )
         for alias in matching_fields
     ]
@@ -168,6 +210,7 @@ def generate_matching_edges(
 
 class SessionError(Exception):
     """Raised when a session error has occurred"""
+
     pass
 
 
@@ -184,74 +227,129 @@ def invoke_all(context: CliContext):
             context.invoker.services.logger.error(
                 f"Error in node {n} (source node {context.session.prepared_source_mapping[n]}): {context.session.errors[n]}"
             )
-        
+
         raise SessionError()
 
 
 def invoke_cli():
-    config = Args()
-    config.parse_args()
-    model_manager = get_model_manager(config,logger=logger)
+    logger.info(f"InvokeAI version {__version__}")
+    # get the optional list of invocations to execute on the command line
+    parser = config.get_parser()
+    parser.add_argument("commands", nargs="*")
+    invocation_commands = parser.parse_args().commands
 
-    # This initializes the autocompleter and returns it.
-    # Currently nothing is done with the returned Completer
-    # object, but the object can be used to change autocompletion
-    # behavior on the fly, if desired.
-    set_autocompleter(model_manager)
+    # get the optional file to read commands from.
+    # Simplest is to use it for STDIN
+    if infile := config.from_file:
+        sys.stdin = open(infile, "r")
+
+    model_manager = ModelManagerService(config, logger)
 
     events = EventServiceBase()
-
-    metadata = PngMetadataService()
-
-    output_folder = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "../../../outputs")
-    )
+    output_folder = config.output_path
 
     # TODO: build a file/path manager?
-    db_location = os.path.join(output_folder, "invokeai.db")
+    if config.use_memory_db:
+        db_location = ":memory:"
+    else:
+        db_location = config.db_path
+        db_location.parent.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f'InvokeAI database location is "{db_location}"')
+
+    graph_execution_manager = SqliteItemStorage[GraphExecutionState](
+        filename=db_location, table_name="graph_executions"
+    )
+
+    urls = LocalUrlService()
+    image_record_storage = SqliteImageRecordStorage(db_location)
+    image_file_storage = DiskImageFileStorage(f"{output_folder}/images")
+    names = SimpleNameService()
+
+    board_record_storage = SqliteBoardRecordStorage(db_location)
+    board_image_record_storage = SqliteBoardImageRecordStorage(db_location)
+
+    boards = BoardService(
+        services=BoardServiceDependencies(
+            board_image_record_storage=board_image_record_storage,
+            board_record_storage=board_record_storage,
+            image_record_storage=image_record_storage,
+            url=urls,
+            logger=logger,
+        )
+    )
+
+    board_images = BoardImagesService(
+        services=BoardImagesServiceDependencies(
+            board_image_record_storage=board_image_record_storage,
+            board_record_storage=board_record_storage,
+            image_record_storage=image_record_storage,
+            url=urls,
+            logger=logger,
+        )
+    )
+
+    images = ImageService(
+        services=ImageServiceDependencies(
+            board_image_record_storage=board_image_record_storage,
+            image_record_storage=image_record_storage,
+            image_file_storage=image_file_storage,
+            url=urls,
+            logger=logger,
+            names=names,
+            graph_execution_manager=graph_execution_manager,
+        )
+    )
 
     services = InvocationServices(
         model_manager=model_manager,
         events=events,
-        latents = ForwardCacheLatentsStorage(DiskLatentsStorage(f'{output_folder}/latents')),
-        images=DiskImageStorage(f'{output_folder}/images', metadata_service=metadata),
-        metadata=metadata,
+        latents=ForwardCacheLatentsStorage(DiskLatentsStorage(f"{output_folder}/latents")),
+        images=images,
+        boards=boards,
+        board_images=board_images,
         queue=MemoryInvocationQueue(),
-        graph_library=SqliteItemStorage[LibraryGraph](
-            filename=db_location, table_name="graphs"
-        ),
-        graph_execution_manager=SqliteItemStorage[GraphExecutionState](
-            filename=db_location, table_name="graph_executions"
-        ),
+        graph_library=SqliteItemStorage[LibraryGraph](filename=db_location, table_name="graphs"),
+        graph_execution_manager=graph_execution_manager,
         processor=DefaultInvocationProcessor(),
-        restoration=RestorationServices(config,logger=logger),
+        performance_statistics=InvocationStatsService(graph_execution_manager),
         logger=logger,
+        configuration=config,
     )
 
     system_graphs = create_system_graphs(services.graph_library)
     system_graph_names = set([g.name for g in system_graphs])
+    set_autocompleter(services)
 
     invoker = Invoker(services)
     session: GraphExecutionState = invoker.create_execution_state()
     parser = get_command_parser(services)
 
-    re_negid = re.compile('^-[0-9]+$')
+    re_negid = re.compile("^-[0-9]+$")
 
     # Uncomment to print out previous sessions at startup
     # print(services.session_manager.list())
 
     context = CliContext(invoker, session, parser)
+    set_autocompleter(services)
 
-    while True:
+    command_line_args_exist = len(invocation_commands) > 0
+    done = False
+
+    while not done:
         try:
-            cmd_input = input("invoke> ")
+            if command_line_args_exist:
+                cmd_input = invocation_commands.pop(0)
+                done = len(invocation_commands) == 0
+            else:
+                cmd_input = input("invoke> ")
         except (KeyboardInterrupt, EOFError):
             # Ctrl-c exits
             break
 
         try:
             # Refresh the state of the session
-            #history = list(get_graph_execution_history(context.session))
+            # history = list(get_graph_execution_history(context.session))
             history = list(reversed(context.nodes_added))
 
             # Split the command for piping
@@ -272,17 +370,17 @@ def invoke_cli():
                         args[field_name] = field_default
 
                 # Parse invocation
-                command: CliCommand = None # type:ignore
-                system_graph: LibraryGraph|None = None
-                if args['type'] in system_graph_names:
-                    system_graph = next(filter(lambda g: g.name == args['type'], system_graphs))
+                command: CliCommand = None  # type:ignore
+                system_graph: Optional[LibraryGraph] = None
+                if args["type"] in system_graph_names:
+                    system_graph = next(filter(lambda g: g.name == args["type"], system_graphs))
                     invocation = GraphInvocation(graph=system_graph.graph, id=str(current_id))
                     for exposed_input in system_graph.exposed_inputs:
                         if exposed_input.alias in args:
                             node = invocation.graph.get_node(exposed_input.node_path)
                             field = exposed_input.field
                             setattr(node, field, args[exposed_input.alias])
-                    command = CliCommand(command = invocation)
+                    command = CliCommand(command=invocation)
                     context.graph_nodes[invocation.id] = system_graph.id
                 else:
                     args["id"] = current_id
@@ -304,17 +402,13 @@ def invoke_cli():
                 # Pipe previous command output (if there was a previous command)
                 edges: list[Edge] = list()
                 if len(history) > 0 or current_id != start_id:
-                    from_id = (
-                        history[0] if current_id == start_id else str(current_id - 1)
-                    )
+                    from_id = history[0] if current_id == start_id else str(current_id - 1)
                     from_node = (
                         next(filter(lambda n: n[0].id == from_id, new_invocations))[0]
                         if current_id != start_id
                         else context.session.graph.get_node(from_id)
                     )
-                    matching_edges = generate_matching_edges(
-                        from_node, command.command, context
-                    )
+                    matching_edges = generate_matching_edges(from_node, command.command, context)
                     edges.extend(matching_edges)
 
                 # Parse provided links
@@ -325,16 +419,18 @@ def invoke_cli():
                             node_id = str(current_id + int(node_id))
 
                         link_node = context.session.graph.get_node(node_id)
-                        matching_edges = generate_matching_edges(
-                            link_node, command.command, context
-                        )
+                        matching_edges = generate_matching_edges(link_node, command.command, context)
                         matching_destinations = [e.destination for e in matching_edges]
                         edges = [e for e in edges if e.destination not in matching_destinations]
                         edges.extend(matching_edges)
 
                 if "link" in args and args["link"]:
                     for link in args["link"]:
-                        edges = [e for e in edges if e.destination.node_id != command.command.id or e.destination.field != link[2]]
+                        edges = [
+                            e
+                            for e in edges
+                            if e.destination.node_id != command.command.id or e.destination.field != link[2]
+                        ]
 
                         node_id = link[0]
                         if re_negid.match(node_id):
@@ -347,7 +443,7 @@ def invoke_cli():
                         edges.append(
                             Edge(
                                 source=EdgeConnection(node_id=node_output.node_path, field=node_output.field),
-                                destination=EdgeConnection(node_id=node_input.node_path, field=node_input.field)
+                                destination=EdgeConnection(node_id=node_input.node_path, field=node_input.field),
                             )
                         )
 
@@ -367,6 +463,9 @@ def invoke_cli():
         except InvalidArgs:
             invoker.services.logger.warning('Invalid command, use "help" to list commands')
             continue
+
+        except ValidationError:
+            invoker.services.logger.warning('Invalid command arguments, run "<command> --help" for summary')
 
         except SessionError:
             # Start a new session

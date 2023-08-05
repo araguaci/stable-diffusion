@@ -4,11 +4,10 @@ invokeai.backend.generator.inpaint descends from .generator
 from __future__ import annotations
 
 import math
-from typing import Tuple, Union
+from typing import Tuple, Union, Optional
 
 import cv2
 import numpy as np
-import PIL
 import torch
 from PIL import Image, ImageChops, ImageFilter, ImageOps
 
@@ -69,15 +68,11 @@ class Inpaint(Img2Img):
             return im
 
         # Patchmatch (note, we may want to expose patch_size? Increasing it significantly impacts performance though)
-        im_patched_np = PatchMatch.inpaint(
-            im.convert("RGB"), ImageOps.invert(im.split()[-1]), patch_size=3
-        )
+        im_patched_np = PatchMatch.inpaint(im.convert("RGB"), ImageOps.invert(im.split()[-1]), patch_size=3)
         im_patched = Image.fromarray(im_patched_np, mode="RGB")
         return im_patched
 
-    def tile_fill_missing(
-        self, im: Image.Image, tile_size: int = 16, seed: Union[int, None] = None
-    ) -> Image.Image:
+    def tile_fill_missing(self, im: Image.Image, tile_size: int = 16, seed: Optional[int] = None) -> Image.Image:
         # Only fill if there's an alpha layer
         if im.mode != "RGBA":
             return im
@@ -128,15 +123,11 @@ class Inpaint(Img2Img):
 
         return si
 
-    def mask_edge(
-        self, mask: Image.Image, edge_size: int, edge_blur: int
-    ) -> Image.Image:
+    def mask_edge(self, mask: Image.Image, edge_size: int, edge_blur: int) -> Image.Image:
         npimg = np.asarray(mask, dtype=np.uint8)
 
         # Detect any partially transparent regions
-        npgradient = np.uint8(
-            255 * (1.0 - np.floor(np.abs(0.5 - np.float32(npimg) / 255.0) * 2.0))
-        )
+        npgradient = np.uint8(255 * (1.0 - np.floor(np.abs(0.5 - np.float32(npimg) / 255.0) * 2.0)))
 
         # Detect hard edges
         npedge = cv2.Canny(npimg, threshold1=100, threshold2=200)
@@ -145,9 +136,7 @@ class Inpaint(Img2Img):
         npmask = npgradient + npedge
 
         # Expand
-        npmask = cv2.dilate(
-            npmask, np.ones((3, 3), np.uint8), iterations=int(edge_size / 2)
-        )
+        npmask = cv2.dilate(npmask, np.ones((3, 3), np.uint8), iterations=int(edge_size / 2))
 
         new_mask = Image.fromarray(npmask)
 
@@ -161,9 +150,7 @@ class Inpaint(Img2Img):
         im: Image.Image,
         seam_size: int,
         seam_blur: int,
-        prompt,
         seed,
-        sampler,
         steps,
         cfg_scale,
         ddim_eta,
@@ -177,8 +164,6 @@ class Inpaint(Img2Img):
         mask = self.mask_edge(hard_mask, seam_size, seam_blur)
 
         make_image = self.get_make_image(
-            prompt,
-            sampler,
             steps,
             cfg_scale,
             ddim_eta,
@@ -196,21 +181,19 @@ class Inpaint(Img2Img):
 
         seam_noise = self.get_noise(im.width, im.height)
 
-        result = make_image(seam_noise, seed)
+        result = make_image(seam_noise, seed=None)
 
         return result
 
     @torch.no_grad()
     def get_make_image(
         self,
-        prompt,
-        sampler,
         steps,
         cfg_scale,
         ddim_eta,
         conditioning,
-        init_image: Image.Image | torch.FloatTensor,
-        mask_image: Image.Image | torch.FloatTensor,
+        init_image: Union[Image.Image, torch.FloatTensor],
+        mask_image: Union[Image.Image, torch.FloatTensor],
         strength: float,
         mask_blur_radius: int = 8,
         # Seam settings - when 0, doesn't fill seam
@@ -249,25 +232,19 @@ class Inpaint(Img2Img):
             if infill_method == "patchmatch" and PatchMatch.patchmatch_available():
                 init_filled = self.infill_patchmatch(self.pil_image.copy())
             elif infill_method == "tile":
-                init_filled = self.tile_fill_missing(
-                    self.pil_image.copy(), seed=self.seed, tile_size=tile_size
-                )
+                init_filled = self.tile_fill_missing(self.pil_image.copy(), seed=self.seed, tile_size=tile_size)
             elif infill_method == "solid":
                 solid_bg = Image.new("RGBA", init_image.size, inpaint_fill)
                 init_filled = Image.alpha_composite(solid_bg, init_image)
             else:
-                raise ValueError(
-                    f"Non-supported infill type {infill_method}", infill_method
-                )
+                raise ValueError(f"Non-supported infill type {infill_method}", infill_method)
             init_filled.paste(init_image, (0, 0), init_image.split()[-1])
 
             # Resize if requested for inpainting
             if inpaint_width and inpaint_height:
                 init_filled = init_filled.resize((inpaint_width, inpaint_height))
 
-            debug_image(
-                init_filled, "init_filled", debug_status=self.enable_image_debugging
-            )
+            debug_image(init_filled, "init_filled", debug_status=self.enable_image_debugging)
 
             # Create init tensor
             init_image = image_resized_to_grid_as_tensor(init_filled.convert("RGB"))
@@ -296,9 +273,7 @@ class Inpaint(Img2Img):
                 "mask_image AFTER multiply with pil_image",
                 debug_status=self.enable_image_debugging,
             )
-            mask: torch.FloatTensor = image_resized_to_grid_as_tensor(
-                mask_image, normalize=False
-            )
+            mask: torch.FloatTensor = image_resized_to_grid_as_tensor(mask_image, normalize=False)
         else:
             mask: torch.FloatTensor = mask_image
 
@@ -306,13 +281,12 @@ class Inpaint(Img2Img):
 
         # noinspection PyTypeChecker
         pipeline: StableDiffusionGeneratorPipeline = self.model
-        pipeline.scheduler = sampler
 
         # todo: support cross-attention control
         uc, c, _ = conditioning
-        conditioning_data = ConditioningData(
-            uc, c, cfg_scale
-        ).add_scheduler_args_if_applicable(pipeline.scheduler, eta=ddim_eta)
+        conditioning_data = ConditioningData(uc, c, cfg_scale).add_scheduler_args_if_applicable(
+            pipeline.scheduler, eta=ddim_eta
+        )
 
         def make_image(x_T: torch.Tensor, seed: int):
             pipeline_output = pipeline.inpaint_from_embeddings(
@@ -326,15 +300,10 @@ class Inpaint(Img2Img):
                 seed=seed,
             )
 
-            if (
-                pipeline_output.attention_map_saver is not None
-                and attention_maps_callback is not None
-            ):
+            if pipeline_output.attention_map_saver is not None and attention_maps_callback is not None:
                 attention_maps_callback(pipeline_output.attention_map_saver)
 
-            result = self.postprocess_size_and_mask(
-                pipeline.numpy_to_pil(pipeline_output.images)[0]
-            )
+            result = self.postprocess_size_and_mask(pipeline.numpy_to_pil(pipeline_output.images)[0])
 
             # Seam paint if this is our first pass (seam_size set to 0 during seam painting)
             if seam_size > 0:
@@ -345,9 +314,7 @@ class Inpaint(Img2Img):
                     result,
                     seam_size,
                     seam_blur,
-                    prompt,
                     seed,
-                    sampler,
                     seam_steps,
                     cfg_scale,
                     ddim_eta,
@@ -360,8 +327,6 @@ class Inpaint(Img2Img):
 
                 # Restore original settings
                 self.get_make_image(
-                    prompt,
-                    sampler,
                     steps,
                     cfg_scale,
                     ddim_eta,

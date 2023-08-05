@@ -1,24 +1,29 @@
-import { startAppListening } from '..';
-import { sessionCreated } from 'services/thunks/session';
-import { buildNodesGraph } from 'features/nodes/util/graphBuilders/buildNodesGraph';
-import { log } from 'app/logging/useLogger';
-import { nodesGraphBuilt } from 'features/nodes/store/actions';
+import { logger } from 'app/logging/logger';
 import { userInvoked } from 'app/store/actions';
-
-const moduleLog = log.child({ namespace: 'invoke' });
+import { parseify } from 'common/util/serialize';
+import { nodesGraphBuilt } from 'features/nodes/store/actions';
+import { buildNodesGraph } from 'features/nodes/util/graphBuilders/buildNodesGraph';
+import { sessionReadyToInvoke } from 'features/system/store/actions';
+import { sessionCreated } from 'services/api/thunks/session';
+import { startAppListening } from '..';
 
 export const addUserInvokedNodesListener = () => {
   startAppListening({
     predicate: (action): action is ReturnType<typeof userInvoked> =>
       userInvoked.match(action) && action.payload === 'nodes',
-    effect: (action, { getState, dispatch }) => {
+    effect: async (action, { getState, dispatch, take }) => {
+      const log = logger('session');
       const state = getState();
 
       const graph = buildNodesGraph(state);
       dispatch(nodesGraphBuilt(graph));
-      moduleLog({ data: graph }, 'Nodes graph built');
+      log.debug({ graph: parseify(graph) }, 'Nodes graph built');
 
       dispatch(sessionCreated({ graph }));
+
+      await take(sessionCreated.fulfilled.match);
+
+      dispatch(sessionReadyToInvoke());
     },
   });
 };

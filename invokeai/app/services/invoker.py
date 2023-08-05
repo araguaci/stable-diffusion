@@ -1,13 +1,11 @@
 # Copyright (c) 2022 Kyle Schouviller (https://github.com/kyle0654)
 
 from abc import ABC
-from threading import Event, Thread
+from typing import Optional
 
-from ..invocations.baseinvocation import InvocationContext
 from .graph import Graph, GraphExecutionState
-from .invocation_queue import InvocationQueueABC, InvocationQueueItem
+from .invocation_queue import InvocationQueueItem
 from .invocation_services import InvocationServices
-from .item_storage import ItemStorageABC
 
 
 class Invoker:
@@ -19,10 +17,9 @@ class Invoker:
         self.services = services
         self._start()
 
-    def invoke(
-        self, graph_execution_state: GraphExecutionState, invoke_all: bool = False
-    ) -> str | None:
-        """Determines the next node to invoke and returns the id of the invoked node, or None if there are no nodes to execute"""
+    def invoke(self, graph_execution_state: GraphExecutionState, invoke_all: bool = False) -> Optional[str]:
+        """Determines the next node to invoke and enqueues it, preparing if needed.
+        Returns the id of the queued node, or `None` if there are no nodes left to enqueue."""
 
         # Get the next invocation
         invocation = graph_execution_state.next()
@@ -44,7 +41,7 @@ class Invoker:
 
         return invocation.id
 
-    def create_execution_state(self, graph: Graph | None = None) -> GraphExecutionState:
+    def create_execution_state(self, graph: Optional[Graph] = None) -> GraphExecutionState:
         """Creates a new execution state for the given graph"""
         new_state = GraphExecutionState(graph=Graph() if graph is None else graph)
         self.services.graph_execution_manager.set(new_state)

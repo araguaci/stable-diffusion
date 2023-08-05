@@ -1,14 +1,19 @@
-export declare type InvokeAIThemeColors = {
+export type InvokeAIThemeColors = {
   base: Partial<InvokeAIPaletteSteps>;
+  baseAlpha: Partial<InvokeAIPaletteSteps>;
   accent: Partial<InvokeAIPaletteSteps>;
+  accentAlpha: Partial<InvokeAIPaletteSteps>;
   working: Partial<InvokeAIPaletteSteps>;
+  workingAlpha: Partial<InvokeAIPaletteSteps>;
   warning: Partial<InvokeAIPaletteSteps>;
+  warningAlpha: Partial<InvokeAIPaletteSteps>;
   ok: Partial<InvokeAIPaletteSteps>;
+  okAlpha: Partial<InvokeAIPaletteSteps>;
   error: Partial<InvokeAIPaletteSteps>;
-  gridLineColor: string;
+  errorAlpha: Partial<InvokeAIPaletteSteps>;
 };
 
-export declare type InvokeAIPaletteSteps = {
+export type InvokeAIPaletteSteps = {
   0: string;
   50: string;
   100: string;

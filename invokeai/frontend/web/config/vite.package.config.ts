@@ -1,19 +1,13 @@
-import react from '@vitejs/plugin-react-swc';
 import path from 'path';
-import { visualizer } from 'rollup-plugin-visualizer';
-import { PluginOption, UserConfig } from 'vite';
+import { UserConfig } from 'vite';
 import dts from 'vite-plugin-dts';
-import eslint from 'vite-plugin-eslint';
-import tsconfigPaths from 'vite-tsconfig-paths';
 import cssInjectedByJsPlugin from 'vite-plugin-css-injected-by-js';
+import { commonPlugins } from './common';
 
 export const packageConfig: UserConfig = {
   base: './',
   plugins: [
-    react(),
-    eslint(),
-    tsconfigPaths(),
-    visualizer() as unknown as PluginOption,
+    ...commonPlugins,
     dts({
       insertTypesEntry: true,
     }),
@@ -27,7 +21,7 @@ export const packageConfig: UserConfig = {
       fileName: (format) => `invoke-ai-ui.${format}.js`,
     },
     rollupOptions: {
-      external: ['react', 'react-dom', '@emotion/react'],
+      external: ['react', 'react-dom', '@emotion/react', '@chakra-ui/react'],
       output: {
         globals: {
           react: 'React',

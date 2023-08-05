@@ -1,19 +1,19 @@
-import 'reactflow/dist/style.css';
 import { Box } from '@chakra-ui/react';
 import { ReactFlowProvider } from 'reactflow';
+import 'reactflow/dist/style.css';
 
-import { Flow } from './Flow';
 import { memo } from 'react';
+import { Flow } from './Flow';
 
 const NodeEditor = () => {
   return (
     <Box
+      layerStyle={'first'}
       sx={{
         position: 'relative',
         width: 'full',
-        height: { base: '100vh', xl: 'full' },
-        borderRadius: 'md',
-        bg: 'base.850',
+        height: 'full',
+        borderRadius: 'base',
       }}
     >
       <ReactFlowProvider>

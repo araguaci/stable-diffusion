@@ -4,17 +4,31 @@ export const HANDLE_TOOLTIP_OPEN_DELAY = 500;
 
 export const FIELD_TYPE_MAP: Record<string, FieldType> = {
   integer: 'integer',
+  float: 'float',
   number: 'float',
   string: 'string',
   boolean: 'boolean',
   enum: 'enum',
   ImageField: 'image',
+  image_collection: 'image_collection',
   LatentsField: 'latents',
   ConditioningField: 'conditioning',
+  UNetField: 'unet',
+  ClipField: 'clip',
+  VaeField: 'vae',
   model: 'model',
+  refiner_model: 'refiner_model',
+  vae_model: 'vae_model',
+  lora_model: 'lora_model',
+  controlnet_model: 'controlnet_model',
+  ControlNetModelField: 'controlnet_model',
   array: 'array',
   item: 'item',
   ColorField: 'color',
+  ControlField: 'control',
+  control: 'control',
+  cfg_scale: 'float',
+  control_weight: 'float',
 };
 
 const COLOR_TOKEN_VALUE = 500;
@@ -59,6 +73,12 @@ export const FIELDS: Record<FieldType, FieldUIConfig> = {
     title: 'Image',
     description: 'Images may be passed between nodes.',
   },
+  image_collection: {
+    color: 'purple',
+    colorCssVar: getColorTokenCssVariable('purple'),
+    title: 'Image Collection',
+    description: 'A collection of images.',
+  },
   latents: {
     color: 'pink',
     colorCssVar: getColorTokenCssVariable('pink'),
@@ -71,10 +91,58 @@ export const FIELDS: Record<FieldType, FieldUIConfig> = {
     title: 'Conditioning',
     description: 'Conditioning may be passed between nodes.',
   },
+  unet: {
+    color: 'red',
+    colorCssVar: getColorTokenCssVariable('red'),
+    title: 'UNet',
+    description: 'UNet submodel.',
+  },
+  clip: {
+    color: 'green',
+    colorCssVar: getColorTokenCssVariable('green'),
+    title: 'Clip',
+    description: 'Tokenizer and text_encoder submodels.',
+  },
+  vae: {
+    color: 'blue',
+    colorCssVar: getColorTokenCssVariable('blue'),
+    title: 'Vae',
+    description: 'Vae submodel.',
+  },
+  control: {
+    color: 'cyan',
+    colorCssVar: getColorTokenCssVariable('cyan'), // TODO: no free color left
+    title: 'Control',
+    description: 'Control info passed between nodes.',
+  },
   model: {
     color: 'teal',
     colorCssVar: getColorTokenCssVariable('teal'),
     title: 'Model',
+    description: 'Models are models.',
+  },
+  refiner_model: {
+    color: 'teal',
+    colorCssVar: getColorTokenCssVariable('teal'),
+    title: 'Refiner Model',
+    description: 'Models are models.',
+  },
+  vae_model: {
+    color: 'teal',
+    colorCssVar: getColorTokenCssVariable('teal'),
+    title: 'VAE',
+    description: 'Models are models.',
+  },
+  lora_model: {
+    color: 'teal',
+    colorCssVar: getColorTokenCssVariable('teal'),
+    title: 'LoRA',
+    description: 'Models are models.',
+  },
+  controlnet_model: {
+    color: 'teal',
+    colorCssVar: getColorTokenCssVariable('teal'),
+    title: 'ControlNet',
     description: 'Models are models.',
   },
   array: {
@@ -96,3 +164,5 @@ export const FIELDS: Record<FieldType, FieldUIConfig> = {
     description: 'A RGBA color.',
   },
 };
+
+export const NODE_MIN_WIDTH = 250;

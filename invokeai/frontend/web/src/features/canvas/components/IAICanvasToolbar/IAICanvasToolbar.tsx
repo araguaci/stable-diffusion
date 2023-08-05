@@ -1,10 +1,16 @@
-import { ButtonGroup, Flex } from '@chakra-ui/react';
+import { Box, ButtonGroup, Flex } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
 import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import IAIIconButton from 'common/components/IAIIconButton';
-import IAISelect from 'common/components/IAISelect';
-import useImageUploader from 'common/hooks/useImageUploader';
+import IAIMantineSelect from 'common/components/IAIMantineSelect';
+import { useImageUploadButton } from 'common/hooks/useImageUploadButton';
 import { useSingleAndDoubleClick } from 'common/hooks/useSingleAndDoubleClick';
+import {
+  canvasCopiedToClipboard,
+  canvasDownloadedAsImage,
+  canvasMerged,
+  canvasSavedToGallery,
+} from 'features/canvas/store/actions';
 import {
   canvasSelector,
   isStagingSelector,
@@ -21,12 +27,10 @@ import {
   CanvasLayer,
   LAYER_NAMES_DICT,
 } from 'features/canvas/store/canvasTypes';
-import { mergeAndUploadCanvas } from 'features/canvas/store/thunks/mergeAndUploadCanvas';
 import { getCanvasBaseLayer } from 'features/canvas/util/konvaInstanceProvider';
 import { systemSelector } from 'features/system/store/systemSelectors';
+import { useCopyImageToClipboard } from 'features/ui/hooks/useCopyImageToClipboard';
 import { isEqual } from 'lodash-es';
-
-import { ChangeEvent } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useTranslation } from 'react-i18next';
 import {
@@ -70,19 +74,16 @@ export const selector = createSelector(
 
 const IAICanvasToolbar = () => {
   const dispatch = useAppDispatch();
-  const {
-    isProcessing,
-    isStaging,
-    isMaskEnabled,
-    layer,
-    tool,
-    shouldCropToBoundingBoxOnSave,
-  } = useAppSelector(selector);
+  const { isProcessing, isStaging, isMaskEnabled, layer, tool } =
+    useAppSelector(selector);
   const canvasBaseLayer = getCanvasBaseLayer();
 
   const { t } = useTranslation();
+  const { isClipboardAPIAvailable } = useCopyImageToClipboard();
 
-  const { openUploader } = useImageUploader();
+  const { getUploadButtonProps, getUploadInputProps } = useImageUploadButton({
+    postUploadAction: { type: 'SET_CANVAS_INITIAL_IMAGE' },
+  });
 
   useHotkeys(
     ['v'],
@@ -138,10 +139,10 @@ const IAICanvasToolbar = () => {
       handleCopyImageToClipboard();
     },
     {
-      enabled: () => !isStaging,
+      enabled: () => !isStaging && isClipboardAPIAvailable,
       preventDefault: true,
     },
-    [canvasBaseLayer, isProcessing]
+    [canvasBaseLayer, isProcessing, isClipboardAPIAvailable]
   );
 
   useHotkeys(
@@ -183,46 +184,26 @@ const IAICanvasToolbar = () => {
   };
 
   const handleMergeVisible = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: false,
-        shouldSetAsInitialImage: true,
-      })
-    );
+    dispatch(canvasMerged());
   };
 
   const handleSaveToGallery = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: shouldCropToBoundingBoxOnSave ? false : true,
-        cropToBoundingBox: shouldCropToBoundingBoxOnSave,
-        shouldSaveToGallery: true,
-      })
-    );
+    dispatch(canvasSavedToGallery());
   };
 
   const handleCopyImageToClipboard = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: shouldCropToBoundingBoxOnSave ? false : true,
-        cropToBoundingBox: shouldCropToBoundingBoxOnSave,
-        shouldCopy: true,
-      })
-    );
+    if (!isClipboardAPIAvailable) {
+      return;
+    }
+    dispatch(canvasCopiedToClipboard());
   };
 
   const handleDownloadAsImage = () => {
-    dispatch(
-      mergeAndUploadCanvas({
-        cropVisible: shouldCropToBoundingBoxOnSave ? false : true,
-        cropToBoundingBox: shouldCropToBoundingBoxOnSave,
-        shouldDownload: true,
-      })
-    );
+    dispatch(canvasDownloadedAsImage());
   };
 
-  const handleChangeLayer = (e: ChangeEvent<HTMLSelectElement>) => {
-    const newLayer = e.target.value as CanvasLayer;
+  const handleChangeLayer = (v: string) => {
+    const newLayer = v as CanvasLayer;
     dispatch(setLayer(newLayer));
     if (newLayer === 'mask' && !isMaskEnabled) {
       dispatch(setIsMaskEnabled(true));
@@ -234,16 +215,18 @@ const IAICanvasToolbar = () => {
       sx={{
         alignItems: 'center',
         gap: 2,
+        flexWrap: 'wrap',
       }}
     >
-      <IAISelect
-        tooltip={`${t('unifiedCanvas.layer')} (Q)`}
-        tooltipProps={{ hasArrow: true, placement: 'top' }}
-        value={layer}
-        validValues={LAYER_NAMES_DICT}
-        onChange={handleChangeLayer}
-        isDisabled={isStaging}
-      />
+      <Box w={24}>
+        <IAIMantineSelect
+          tooltip={`${t('unifiedCanvas.layer')} (Q)`}
+          value={layer}
+          data={LAYER_NAMES_DICT}
+          onChange={handleChangeLayer}
+          disabled={isStaging}
+        />
+      </Box>
 
       <IAICanvasMaskOptions />
       <IAICanvasToolChooserOptions />
@@ -279,13 +262,15 @@ const IAICanvasToolbar = () => {
           onClick={handleSaveToGallery}
           isDisabled={isStaging}
         />
-        <IAIIconButton
-          aria-label={`${t('unifiedCanvas.copyToClipboard')} (Cmd/Ctrl+C)`}
-          tooltip={`${t('unifiedCanvas.copyToClipboard')} (Cmd/Ctrl+C)`}
-          icon={<FaCopy />}
-          onClick={handleCopyImageToClipboard}
-          isDisabled={isStaging}
-        />
+        {isClipboardAPIAvailable && (
+          <IAIIconButton
+            aria-label={`${t('unifiedCanvas.copyToClipboard')} (Cmd/Ctrl+C)`}
+            tooltip={`${t('unifiedCanvas.copyToClipboard')} (Cmd/Ctrl+C)`}
+            icon={<FaCopy />}
+            onClick={handleCopyImageToClipboard}
+            isDisabled={isStaging}
+          />
+        )}
         <IAIIconButton
           aria-label={`${t('unifiedCanvas.downloadAsImage')} (Shift+D)`}
           tooltip={`${t('unifiedCanvas.downloadAsImage')} (Shift+D)`}
@@ -304,9 +289,10 @@ const IAICanvasToolbar = () => {
           aria-label={`${t('common.upload')}`}
           tooltip={`${t('common.upload')}`}
           icon={<FaUpload />}
-          onClick={openUploader}
           isDisabled={isStaging}
+          {...getUploadButtonProps()}
         />
+        <input {...getUploadInputProps()} />
         <IAIIconButton
           aria-label={`${t('unifiedCanvas.clearCanvas')}`}
           tooltip={`${t('unifiedCanvas.clearCanvas')}`}

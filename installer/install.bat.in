@@ -38,6 +38,7 @@ echo    https://learn.microsoft.com/en-US/cpp/windows/latest-supported-vc-redist
 echo.
 echo See %INSTRUCTIONS% for more details.
 echo.
+echo FOR THE BEST USER EXPERIENCE WE SUGGEST MAXIMIZING THIS WINDOW NOW.
 pause
 
 @rem ---------------------------- check Python version ---------------

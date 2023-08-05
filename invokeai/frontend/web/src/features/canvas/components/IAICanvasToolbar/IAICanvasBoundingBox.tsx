@@ -1,16 +1,17 @@
 import { createSelector } from '@reduxjs/toolkit';
+import { stateSelector } from 'app/store/store';
 import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import {
   roundDownToMultiple,
   roundToMultiple,
 } from 'common/util/roundDownToMultiple';
-import { canvasSelector } from 'features/canvas/store/canvasSelectors';
 import {
   setBoundingBoxCoordinates,
   setBoundingBoxDimensions,
   setIsMouseOverBoundingBox,
   setIsMovingBoundingBox,
   setIsTransformingBoundingBox,
+  setShouldSnapToGrid,
 } from 'features/canvas/store/canvasSlice';
 import Konva from 'konva';
 import { GroupConfig } from 'konva/lib/Group';
@@ -19,11 +20,12 @@ import { Vector2d } from 'konva/lib/types';
 import { isEqual } from 'lodash-es';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useHotkeys } from 'react-hotkeys-hook';
 import { Group, Rect, Transformer } from 'react-konva';
 
 const boundingBoxPreviewSelector = createSelector(
-  canvasSelector,
-  (canvas) => {
+  [stateSelector],
+  ({ canvas, generation }) => {
     const {
       boundingBoxCoordinates,
       boundingBoxDimensions,
@@ -35,6 +37,8 @@ const boundingBoxPreviewSelector = createSelector(
       shouldSnapToGrid,
     } = canvas;
 
+    const { aspectRatio } = generation;
+
     return {
       boundingBoxCoordinates,
       boundingBoxDimensions,
@@ -45,6 +49,7 @@ const boundingBoxPreviewSelector = createSelector(
       shouldSnapToGrid,
       tool,
       hitStrokeWidth: 20 / stageScale,
+      aspectRatio,
     };
   },
   {
@@ -70,6 +75,7 @@ const IAICanvasBoundingBox = (props: IAICanvasBoundingBoxPreviewProps) => {
     shouldSnapToGrid,
     tool,
     hitStrokeWidth,
+    aspectRatio,
   } = useAppSelector(boundingBoxPreviewSelector);
 
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -85,6 +91,10 @@ const IAICanvasBoundingBox = (props: IAICanvasBoundingBoxPreviewProps) => {
   }, []);
 
   const scaledStep = 64 * stageScale;
+
+  useHotkeys('N', () => {
+    dispatch(setShouldSnapToGrid(!shouldSnapToGrid));
+  });
 
   const handleOnDragMove = useCallback(
     (e: KonvaEventObject<DragEvent>) => {
@@ -137,12 +147,22 @@ const IAICanvasBoundingBox = (props: IAICanvasBoundingBoxPreviewProps) => {
     const x = Math.round(rect.x());
     const y = Math.round(rect.y());
 
-    dispatch(
-      setBoundingBoxDimensions({
-        width,
-        height,
-      })
-    );
+    if (aspectRatio) {
+      const newHeight = roundToMultiple(width / aspectRatio, 64);
+      dispatch(
+        setBoundingBoxDimensions({
+          width: width,
+          height: newHeight,
+        })
+      );
+    } else {
+      dispatch(
+        setBoundingBoxDimensions({
+          width,
+          height,
+        })
+      );
+    }
 
     dispatch(
       setBoundingBoxCoordinates({
@@ -154,7 +174,7 @@ const IAICanvasBoundingBox = (props: IAICanvasBoundingBoxPreviewProps) => {
     // Reset the scale now that the coords/dimensions have been un-scaled
     rect.scaleX(1);
     rect.scaleY(1);
-  }, [dispatch, shouldSnapToGrid]);
+  }, [dispatch, shouldSnapToGrid, aspectRatio]);
 
   const anchorDragBoundFunc = useCallback(
     (

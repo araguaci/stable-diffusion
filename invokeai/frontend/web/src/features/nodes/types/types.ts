@@ -1,7 +1,16 @@
+import {
+  ControlNetModelParam,
+  LoRAModelParam,
+  MainModelParam,
+  VaeModelParam,
+} from 'features/parameters/types/parameterSchemas';
 import { OpenAPIV3 } from 'openapi-types';
 import { RgbaColor } from 'react-colorful';
-import { ImageField } from 'services/api';
+import { Graph, ImageDTO, ImageField } from 'services/api/types';
 import { AnyInvocationType } from 'services/events/types';
+import { O } from 'ts-toolbelt';
+
+export type NonNullableGraph = O.Required<Graph, 'nodes' | 'edges'>;
 
 export type InvocationValue = {
   id: string;
@@ -31,12 +40,10 @@ export type InvocationTemplate = {
    * Array of invocation inputs
    */
   inputs: Record<string, InputFieldTemplate>;
-  // inputs: InputField[];
   /**
    * Array of the invocation outputs
    */
   outputs: Record<string, OutputFieldTemplate>;
-  // outputs: OutputField[];
 };
 
 export type FieldUIConfig = {
@@ -58,10 +65,19 @@ export type FieldType =
   | 'image'
   | 'latents'
   | 'conditioning'
+  | 'unet'
+  | 'clip'
+  | 'vae'
+  | 'control'
   | 'model'
+  | 'refiner_model'
+  | 'vae_model'
+  | 'lora_model'
+  | 'controlnet_model'
   | 'array'
   | 'item'
-  | 'color';
+  | 'color'
+  | 'image_collection';
 
 /**
  * An input field is persisted across reloads as part of the user's local state.
@@ -79,11 +95,20 @@ export type InputFieldValue =
   | ImageInputFieldValue
   | LatentsInputFieldValue
   | ConditioningInputFieldValue
+  | UNetInputFieldValue
+  | ClipInputFieldValue
+  | VaeInputFieldValue
+  | ControlInputFieldValue
   | EnumInputFieldValue
-  | ModelInputFieldValue
+  | MainModelInputFieldValue
+  | RefinerModelInputFieldValue
+  | VaeModelInputFieldValue
+  | LoRAModelInputFieldValue
+  | ControlNetModelInputFieldValue
   | ArrayInputFieldValue
   | ItemInputFieldValue
-  | ColorInputFieldValue;
+  | ColorInputFieldValue
+  | ImageCollectionInputFieldValue;
 
 /**
  * An input field template is generated on each page load from the OpenAPI schema.
@@ -99,11 +124,20 @@ export type InputFieldTemplate =
   | ImageInputFieldTemplate
   | LatentsInputFieldTemplate
   | ConditioningInputFieldTemplate
+  | UNetInputFieldTemplate
+  | ClipInputFieldTemplate
+  | VaeInputFieldTemplate
+  | ControlInputFieldTemplate
   | EnumInputFieldTemplate
   | ModelInputFieldTemplate
+  | RefinerModelInputFieldTemplate
+  | VaeModelInputFieldTemplate
+  | LoRAModelInputFieldTemplate
+  | ControlNetModelInputFieldTemplate
   | ArrayInputFieldTemplate
   | ItemInputFieldTemplate
-  | ColorInputFieldTemplate;
+  | ColorInputFieldTemplate
+  | ImageCollectionInputFieldTemplate;
 
 /**
  * An output field is persisted across as part of the user's local state.
@@ -174,17 +208,62 @@ export type LatentsInputFieldValue = FieldValueBase & {
 
 export type ConditioningInputFieldValue = FieldValueBase & {
   type: 'conditioning';
+  value?: string;
+};
+
+export type ControlInputFieldValue = FieldValueBase & {
+  type: 'control';
+  value?: undefined;
+};
+
+export type UNetInputFieldValue = FieldValueBase & {
+  type: 'unet';
+  value?: undefined;
+};
+
+export type ClipInputFieldValue = FieldValueBase & {
+  type: 'clip';
+  value?: undefined;
+};
+
+export type VaeInputFieldValue = FieldValueBase & {
+  type: 'vae';
   value?: undefined;
 };
 
 export type ImageInputFieldValue = FieldValueBase & {
   type: 'image';
-  value?: Pick<ImageField, 'image_name' | 'image_type'>;
+  value?: ImageField;
 };
 
-export type ModelInputFieldValue = FieldValueBase & {
+export type ImageCollectionInputFieldValue = FieldValueBase & {
+  type: 'image_collection';
+  value?: ImageField[];
+};
+
+export type MainModelInputFieldValue = FieldValueBase & {
   type: 'model';
-  value?: string;
+  value?: MainModelParam;
+};
+
+export type RefinerModelInputFieldValue = FieldValueBase & {
+  type: 'refiner_model';
+  value?: MainModelParam;
+};
+
+export type VaeModelInputFieldValue = FieldValueBase & {
+  type: 'vae_model';
+  value?: VaeModelParam;
+};
+
+export type LoRAModelInputFieldValue = FieldValueBase & {
+  type: 'lora_model';
+  value?: LoRAModelParam;
+};
+
+export type ControlNetModelInputFieldValue = FieldValueBase & {
+  type: 'controlnet_model';
+  value?: ControlNetModelParam;
 };
 
 export type ArrayInputFieldValue = FieldValueBase & {
@@ -245,8 +324,13 @@ export type BooleanInputFieldTemplate = InputFieldTemplateBase & {
 };
 
 export type ImageInputFieldTemplate = InputFieldTemplateBase & {
-  default: Pick<ImageField, 'image_name' | 'image_type'>;
+  default: ImageDTO;
   type: 'image';
+};
+
+export type ImageCollectionInputFieldTemplate = InputFieldTemplateBase & {
+  default: ImageField[];
+  type: 'image_collection';
 };
 
 export type LatentsInputFieldTemplate = InputFieldTemplateBase & {
@@ -259,6 +343,26 @@ export type ConditioningInputFieldTemplate = InputFieldTemplateBase & {
   type: 'conditioning';
 };
 
+export type UNetInputFieldTemplate = InputFieldTemplateBase & {
+  default: undefined;
+  type: 'unet';
+};
+
+export type ClipInputFieldTemplate = InputFieldTemplateBase & {
+  default: undefined;
+  type: 'clip';
+};
+
+export type VaeInputFieldTemplate = InputFieldTemplateBase & {
+  default: undefined;
+  type: 'vae';
+};
+
+export type ControlInputFieldTemplate = InputFieldTemplateBase & {
+  default: undefined;
+  type: 'control';
+};
+
 export type EnumInputFieldTemplate = InputFieldTemplateBase & {
   default: string | number;
   type: 'enum';
@@ -269,6 +373,26 @@ export type EnumInputFieldTemplate = InputFieldTemplateBase & {
 export type ModelInputFieldTemplate = InputFieldTemplateBase & {
   default: string;
   type: 'model';
+};
+
+export type RefinerModelInputFieldTemplate = InputFieldTemplateBase & {
+  default: string;
+  type: 'refiner_model';
+};
+
+export type VaeModelInputFieldTemplate = InputFieldTemplateBase & {
+  default: string;
+  type: 'vae_model';
+};
+
+export type LoRAModelInputFieldTemplate = InputFieldTemplateBase & {
+  default: string;
+  type: 'lora_model';
+};
+
+export type ControlNetModelInputFieldTemplate = InputFieldTemplateBase & {
+  default: string;
+  type: 'controlnet_model';
 };
 
 export type ArrayInputFieldTemplate = InputFieldTemplateBase & {

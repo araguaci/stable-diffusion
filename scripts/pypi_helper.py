@@ -2,10 +2,10 @@
 
 import requests
 
-from ldm.invoke import __app_name__, __version__
+from invokeai.version import __version__
 
 local_version = str(__version__).replace("-", "")
-package_name = str(__app_name__)
+package_name = "InvokeAI"
 
 
 def get_pypi_versions(package_name=package_name) -> list[str]:

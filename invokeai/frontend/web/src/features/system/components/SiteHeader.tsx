@@ -1,66 +1,107 @@
-import { Flex, Grid } from '@chakra-ui/react';
-import { memo, useState } from 'react';
+import {
+  Flex,
+  Menu,
+  MenuButton,
+  MenuGroup,
+  MenuItem,
+  MenuList,
+  Spacer,
+} from '@chakra-ui/react';
+import IAIIconButton from 'common/components/IAIIconButton';
+import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  FaBars,
+  FaBug,
+  FaCog,
+  FaDiscord,
+  FaGithub,
+  FaKeyboard,
+} from 'react-icons/fa';
+import { menuListMotionProps } from 'theme/components/menu';
+import { useFeatureStatus } from '../hooks/useFeatureStatus';
+import HotkeysModal from './HotkeysModal/HotkeysModal';
+import InvokeAILogoComponent from './InvokeAILogoComponent';
+import SettingsModal from './SettingsModal/SettingsModal';
 import StatusIndicator from './StatusIndicator';
 
-import InvokeAILogoComponent from './InvokeAILogoComponent';
-import SiteHeaderMenu from './SiteHeaderMenu';
-import useResolution from 'common/hooks/useResolution';
-import { FaBars } from 'react-icons/fa';
-import { useTranslation } from 'react-i18next';
-import IAIIconButton from 'common/components/IAIIconButton';
-
-/**
- * Header, includes color mode toggle, settings button, status message.
- */
 const SiteHeader = () => {
-  const [menuOpened, setMenuOpened] = useState(false);
-  const resolution = useResolution();
   const { t } = useTranslation();
 
+  const isBugLinkEnabled = useFeatureStatus('bugLink').isFeatureEnabled;
+  const isDiscordLinkEnabled = useFeatureStatus('discordLink').isFeatureEnabled;
+  const isGithubLinkEnabled = useFeatureStatus('githubLink').isFeatureEnabled;
+
+  const githubLink = 'http://github.com/invoke-ai/InvokeAI';
+  const discordLink = 'https://discord.gg/ZmtBAhwWhy';
+
   return (
-    <Grid
-      gridTemplateColumns={{ base: 'auto', sm: 'auto max-content' }}
-      paddingRight={{ base: 10, xl: 0 }}
-      gap={2}
+    <Flex
+      sx={{
+        gap: 2,
+        alignItems: 'center',
+      }}
     >
-      <Flex justifyContent={{ base: 'center', sm: 'start' }}>
-        <InvokeAILogoComponent />
-      </Flex>
-      <Flex
-        alignItems="center"
-        gap={2}
-        justifyContent={{ base: 'center', sm: 'start' }}
-      >
-        <StatusIndicator />
+      <InvokeAILogoComponent />
+      <Spacer />
+      <StatusIndicator />
 
-        {resolution === 'desktop' ? (
-          <SiteHeaderMenu />
-        ) : (
-          <IAIIconButton
-            icon={<FaBars />}
-            aria-label={t('accessibility.menu')}
-            background={menuOpened ? 'base.800' : 'none'}
-            _hover={{ background: menuOpened ? 'base.800' : 'none' }}
-            onClick={() => setMenuOpened(!menuOpened)}
-            p={0}
-          ></IAIIconButton>
-        )}
-      </Flex>
-
-      {resolution !== 'desktop' && menuOpened && (
-        <Flex
-          position="absolute"
-          right={6}
-          top={{ base: 28, sm: 16 }}
-          backgroundColor="base.800"
-          padding={4}
-          borderRadius={4}
-          zIndex={{ base: 99, xl: 0 }}
-        >
-          <SiteHeaderMenu />
-        </Flex>
-      )}
-    </Grid>
+      <Menu>
+        <MenuButton
+          as={IAIIconButton}
+          variant="link"
+          aria-label={t('accessibility.menu')}
+          icon={<FaBars />}
+          sx={{ boxSize: 8 }}
+        />
+        <MenuList motionProps={menuListMotionProps}>
+          <MenuGroup title={t('common.communityLabel')}>
+            {isGithubLinkEnabled && (
+              <MenuItem
+                as="a"
+                href={githubLink}
+                target="_blank"
+                icon={<FaGithub />}
+              >
+                {t('common.githubLabel')}
+              </MenuItem>
+            )}
+            {isBugLinkEnabled && (
+              <MenuItem
+                as="a"
+                href={`${githubLink}/issues`}
+                target="_blank"
+                icon={<FaBug />}
+              >
+                {t('common.reportBugLabel')}
+              </MenuItem>
+            )}
+            {isDiscordLinkEnabled && (
+              <MenuItem
+                as="a"
+                href={discordLink}
+                target="_blank"
+                icon={<FaDiscord />}
+              >
+                {t('common.discordLabel')}
+              </MenuItem>
+            )}
+          </MenuGroup>
+          <MenuGroup title={t('common.settingsLabel')}>
+            <HotkeysModal>
+              <MenuItem as="button" icon={<FaKeyboard />}>
+                {t('common.hotkeysLabel')}
+              </MenuItem>
+            </HotkeysModal>
+            <SettingsModal>
+              <MenuItem as="button" icon={<FaCog />}>
+                {t('common.settingsLabel')}
+              </MenuItem>
+            </SettingsModal>
+          </MenuGroup>
+        </MenuList>
+      </Menu>
+    </Flex>
   );
 };
 

@@ -1,49 +1,33 @@
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { createSlice } from '@reduxjs/toolkit';
-import { setActiveTabReducer } from './extraReducers';
-import { InvokeTabName, tabMap } from './tabMap';
-import { AddNewModelType, Coordinates, Rect, UIState } from './uiTypes';
-import { initialImageSelected } from 'features/parameters/store/actions';
 import { initialImageChanged } from 'features/parameters/store/generationSlice';
+import { SchedulerParam } from 'features/parameters/types/parameterSchemas';
+import { setActiveTabReducer } from './extraReducers';
+import { InvokeTabName } from './tabMap';
+import { UIState } from './uiTypes';
 
 export const initialUIState: UIState = {
   activeTab: 0,
-  currentTheme: 'dark',
-  parametersPanelScrollPosition: 0,
   shouldPinParametersPanel: true,
   shouldShowParametersPanel: true,
   shouldShowImageDetails: false,
   shouldUseCanvasBetaLayout: false,
   shouldShowExistingModelsInSearch: false,
   shouldUseSliders: false,
-  addNewModelUIOption: null,
   shouldPinGallery: true,
   shouldShowGallery: true,
   shouldHidePreview: false,
-  textTabAccordionState: [],
-  imageTabAccordionState: [],
-  canvasTabAccordionState: [],
-  floatingProgressImageRect: { x: 0, y: 0, width: 0, height: 0 },
-  shouldShowProgressImages: false,
-  shouldShowProgressInViewer: false,
-  shouldShowImageParameters: false,
+  shouldShowProgressInViewer: true,
+  shouldShowEmbeddingPicker: false,
+  favoriteSchedulers: [],
 };
 
 export const uiSlice = createSlice({
   name: 'ui',
   initialState: initialUIState,
   reducers: {
-    setActiveTab: (state, action: PayloadAction<number | InvokeTabName>) => {
+    setActiveTab: (state, action: PayloadAction<InvokeTabName>) => {
       setActiveTabReducer(state, action.payload);
-    },
-    setCurrentTheme: (state, action: PayloadAction<string>) => {
-      state.currentTheme = action.payload;
-    },
-    setParametersPanelScrollPosition: (
-      state,
-      action: PayloadAction<number>
-    ) => {
-      state.parametersPanelScrollPosition = action.payload;
     },
     setShouldPinParametersPanel: (state, action: PayloadAction<boolean>) => {
       state.shouldPinParametersPanel = action.payload;
@@ -69,12 +53,6 @@ export const uiSlice = createSlice({
     },
     setShouldUseSliders: (state, action: PayloadAction<boolean>) => {
       state.shouldUseSliders = action.payload;
-    },
-    setAddNewModelUIOption: (state, action: PayloadAction<AddNewModelType>) => {
-      state.addNewModelUIOption = action.payload;
-    },
-    setShouldPinGallery: (state, action: PayloadAction<boolean>) => {
-      state.shouldPinGallery = action.payload;
     },
     setShouldShowGallery: (state, action: PayloadAction<boolean>) => {
       state.shouldShowGallery = action.payload;
@@ -106,45 +84,17 @@ export const uiSlice = createSlice({
         state.shouldShowParametersPanel = true;
       }
     },
-    openAccordionItemsChanged: (state, action: PayloadAction<number[]>) => {
-      if (tabMap[state.activeTab] === 'txt2img') {
-        state.textTabAccordionState = action.payload;
-      }
-
-      if (tabMap[state.activeTab] === 'img2img') {
-        state.imageTabAccordionState = action.payload;
-      }
-
-      if (tabMap[state.activeTab] === 'unifiedCanvas') {
-        state.canvasTabAccordionState = action.payload;
-      }
-    },
-    floatingProgressImageMoved: (state, action: PayloadAction<Coordinates>) => {
-      state.floatingProgressImageRect = {
-        ...state.floatingProgressImageRect,
-        ...action.payload,
-      };
-    },
-    floatingProgressImageResized: (
-      state,
-      action: PayloadAction<Partial<Rect>>
-    ) => {
-      state.floatingProgressImageRect = {
-        ...state.floatingProgressImageRect,
-        ...action.payload,
-      };
-    },
-    setShouldShowProgressImages: (state, action: PayloadAction<boolean>) => {
-      state.shouldShowProgressImages = action.payload;
-    },
     setShouldShowProgressInViewer: (state, action: PayloadAction<boolean>) => {
       state.shouldShowProgressInViewer = action.payload;
     },
-    shouldShowImageParametersChanged: (
+    favoriteSchedulersChanged: (
       state,
-      action: PayloadAction<boolean>
+      action: PayloadAction<SchedulerParam[]>
     ) => {
-      state.shouldShowImageParameters = action.payload;
+      state.favoriteSchedulers = action.payload;
+    },
+    toggleEmbeddingPicker: (state) => {
+      state.shouldShowEmbeddingPicker = !state.shouldShowEmbeddingPicker;
     },
   },
   extraReducers(builder) {
@@ -156,29 +106,22 @@ export const uiSlice = createSlice({
 
 export const {
   setActiveTab,
-  setCurrentTheme,
-  setParametersPanelScrollPosition,
   setShouldPinParametersPanel,
   setShouldShowParametersPanel,
   setShouldShowImageDetails,
   setShouldUseCanvasBetaLayout,
   setShouldShowExistingModelsInSearch,
   setShouldUseSliders,
-  setAddNewModelUIOption,
   setShouldHidePreview,
-  setShouldPinGallery,
   setShouldShowGallery,
   togglePanels,
   togglePinGalleryPanel,
   togglePinParametersPanel,
   toggleParametersPanel,
   toggleGalleryPanel,
-  openAccordionItemsChanged,
-  floatingProgressImageMoved,
-  floatingProgressImageResized,
-  setShouldShowProgressImages,
   setShouldShowProgressInViewer,
-  shouldShowImageParametersChanged,
+  favoriteSchedulersChanged,
+  toggleEmbeddingPicker,
 } = uiSlice.actions;
 
 export default uiSlice.reducer;

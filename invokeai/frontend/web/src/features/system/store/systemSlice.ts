@@ -1,34 +1,33 @@
 import { UseToastOptions } from '@chakra-ui/react';
-import type { PayloadAction } from '@reduxjs/toolkit';
-import { createSlice } from '@reduxjs/toolkit';
-import * as InvokeAI from 'app/types/invokeai';
-import {
-  generatorProgress,
-  graphExecutionStateComplete,
-  invocationComplete,
-  invocationError,
-  invocationStarted,
-  socketConnected,
-  socketDisconnected,
-  socketSubscribed,
-  socketUnsubscribed,
-} from 'services/events/actions';
-
-import { ProgressImage } from 'services/events/types';
-import { makeToast } from '../hooks/useToastWatcher';
-import { sessionCanceled, sessionInvoked } from 'services/thunks/session';
-import { receivedModels } from 'services/thunks/model';
-import { parsedOpenAPISchema } from 'features/nodes/store/nodesSlice';
-import { LogLevelName } from 'roarr';
-import { InvokeLogLevel } from 'app/logging/useLogger';
-import { TFuncKey } from 'i18next';
-import { t } from 'i18next';
+import { PayloadAction, createSlice, isAnyOf } from '@reduxjs/toolkit';
+import { InvokeLogLevel } from 'app/logging/logger';
 import { userInvoked } from 'app/store/actions';
-import { LANGUAGES } from '../components/LanguagePicker';
+import { nodeTemplatesBuilt } from 'features/nodes/store/nodesSlice';
+import { t } from 'i18next';
+import { LogLevelName } from 'roarr';
+import {
+  isAnySessionRejected,
+  sessionCanceled,
+} from 'services/api/thunks/session';
+import {
+  appSocketConnected,
+  appSocketDisconnected,
+  appSocketGeneratorProgress,
+  appSocketGraphExecutionStateComplete,
+  appSocketInvocationComplete,
+  appSocketInvocationError,
+  appSocketInvocationRetrievalError,
+  appSocketInvocationStarted,
+  appSocketSessionRetrievalError,
+  appSocketSubscribed,
+  appSocketUnsubscribed,
+} from 'services/events/actions';
+import { ProgressImage } from 'services/events/types';
+import { makeToast } from '../util/makeToast';
+import { LANGUAGES } from './constants';
+import { startCase } from 'lodash-es';
 
 export type CancelStrategy = 'immediate' | 'scheduled';
-
-export type InfillMethod = 'tile' | 'patchmatch';
 
 export interface SystemState {
   isGFPGANAvailable: boolean;
@@ -41,13 +40,9 @@ export interface SystemState {
   currentIteration: number;
   totalIterations: number;
   currentStatusHasSteps: boolean;
-  shouldDisplayGuides: boolean;
   isCancelable: boolean;
   enableImageDebugging: boolean;
   toastQueue: UseToastOptions[];
-  searchFolder: string | null;
-  foundModels: InvokeAI.FoundModel[] | null;
-  openModel: string | null;
   /**
    * The current progress image
    */
@@ -81,24 +76,24 @@ export interface SystemState {
    */
   consoleLogLevel: InvokeLogLevel;
   shouldLogToConsole: boolean;
-  statusTranslationKey: TFuncKey;
+  // TODO: probably better to not store keys here, should just be a string that maps to the translation key
+  statusTranslationKey: string;
   /**
    * When a session is canceled, its ID is stored here until a new session is created.
    */
   canceledSession: string;
-  /**
-   * TODO: get this from backend
-   */
-  infillMethods: InfillMethod[];
   isPersisted: boolean;
   shouldAntialiasProgressImage: boolean;
   language: keyof typeof LANGUAGES;
+  isUploading: boolean;
+  isNodesEnabled: boolean;
+  shouldUseNSFWChecker: boolean;
+  shouldUseWatermarker: boolean;
 }
 
 export const initialSystemState: SystemState = {
   isConnected: false,
   isProcessing: false,
-  shouldDisplayGuides: true,
   isGFPGANAvailable: true,
   isESRGANAvailable: true,
   shouldConfirmOnDelete: true,
@@ -110,9 +105,6 @@ export const initialSystemState: SystemState = {
   isCancelable: true,
   enableImageDebugging: false,
   toastQueue: [],
-  searchFolder: null,
-  foundModels: null,
-  openModel: null,
   progressImage: null,
   shouldAntialiasProgressImage: false,
   sessionId: null,
@@ -125,9 +117,12 @@ export const initialSystemState: SystemState = {
   shouldLogToConsole: true,
   statusTranslationKey: 'common.statusDisconnected',
   canceledSession: '',
-  infillMethods: ['tile', 'patchmatch'],
   isPersisted: false,
   language: 'en',
+  isUploading: false,
+  isNodesEnabled: false,
+  shouldUseNSFWChecker: false,
+  shouldUseWatermarker: false,
 };
 
 export const systemSlice = createSlice({
@@ -137,75 +132,14 @@ export const systemSlice = createSlice({
     setIsProcessing: (state, action: PayloadAction<boolean>) => {
       state.isProcessing = action.payload;
     },
-    setCurrentStatus: (state, action: PayloadAction<TFuncKey>) => {
+    setCurrentStatus: (state, action: PayloadAction<string>) => {
       state.statusTranslationKey = action.payload;
-    },
-    errorOccurred: (state) => {
-      state.isProcessing = false;
-      state.isCancelable = true;
-      state.currentStep = 0;
-      state.totalSteps = 0;
-      state.currentIteration = 0;
-      state.totalIterations = 0;
-      state.currentStatusHasSteps = false;
-      state.statusTranslationKey = 'common.statusError';
-    },
-    setIsConnected: (state, action: PayloadAction<boolean>) => {
-      state.isConnected = action.payload;
-      state.isProcessing = false;
-      state.isCancelable = true;
-      state.currentStep = 0;
-      state.totalSteps = 0;
-      state.currentIteration = 0;
-      state.totalIterations = 0;
-      state.currentStatusHasSteps = false;
     },
     setShouldConfirmOnDelete: (state, action: PayloadAction<boolean>) => {
       state.shouldConfirmOnDelete = action.payload;
     },
-    setShouldDisplayGuides: (state, action: PayloadAction<boolean>) => {
-      state.shouldDisplayGuides = action.payload;
-    },
-    processingCanceled: (state) => {
-      state.isProcessing = false;
-      state.isCancelable = true;
-      state.currentStep = 0;
-      state.totalSteps = 0;
-      state.currentIteration = 0;
-      state.totalIterations = 0;
-      state.currentStatusHasSteps = false;
-      state.statusTranslationKey = 'common.statusProcessingCanceled';
-    },
-    generationRequested: (state) => {
-      state.isProcessing = true;
-      state.isCancelable = true;
-      state.currentStep = 0;
-      state.totalSteps = 0;
-      state.currentIteration = 0;
-      state.totalIterations = 0;
-      state.currentStatusHasSteps = false;
-      state.statusTranslationKey = 'common.statusPreparing';
-    },
     setIsCancelable: (state, action: PayloadAction<boolean>) => {
       state.isCancelable = action.payload;
-    },
-    modelChangeRequested: (state) => {
-      state.statusTranslationKey = 'common.statusLoadingModel';
-      state.isCancelable = false;
-      state.isProcessing = true;
-      state.currentStatusHasSteps = false;
-    },
-    modelConvertRequested: (state) => {
-      state.statusTranslationKey = 'common.statusConvertingModel';
-      state.isCancelable = false;
-      state.isProcessing = true;
-      state.currentStatusHasSteps = false;
-    },
-    modelMergingRequested: (state) => {
-      state.statusTranslationKey = 'common.statusMergingModels';
-      state.isCancelable = false;
-      state.isProcessing = true;
-      state.currentStatusHasSteps = false;
     },
     setEnableImageDebugging: (state, action: PayloadAction<boolean>) => {
       state.enableImageDebugging = action.payload;
@@ -215,26 +149,6 @@ export const systemSlice = createSlice({
     },
     clearToastQueue: (state) => {
       state.toastQueue = [];
-    },
-    setProcessingIndeterminateTask: (
-      state,
-      action: PayloadAction<TFuncKey>
-    ) => {
-      state.isProcessing = true;
-      state.statusTranslationKey = action.payload;
-      state.currentStatusHasSteps = false;
-    },
-    setSearchFolder: (state, action: PayloadAction<string | null>) => {
-      state.searchFolder = action.payload;
-    },
-    setFoundModels: (
-      state,
-      action: PayloadAction<InvokeAI.FoundModel[] | null>
-    ) => {
-      state.foundModels = action.payload;
-    },
-    setOpenModel: (state, action: PayloadAction<string | null>) => {
-      state.openModel = action.payload;
     },
     /**
      * A cancel was scheduled
@@ -278,12 +192,24 @@ export const systemSlice = createSlice({
     languageChanged: (state, action: PayloadAction<keyof typeof LANGUAGES>) => {
       state.language = action.payload;
     },
+    progressImageSet(state, action: PayloadAction<ProgressImage | null>) {
+      state.progressImage = action.payload;
+    },
+    setIsNodesEnabled(state, action: PayloadAction<boolean>) {
+      state.isNodesEnabled = action.payload;
+    },
+    shouldUseNSFWCheckerChanged(state, action: PayloadAction<boolean>) {
+      state.shouldUseNSFWChecker = action.payload;
+    },
+    shouldUseWatermarkerChanged(state, action: PayloadAction<boolean>) {
+      state.shouldUseWatermarker = action.payload;
+    },
   },
   extraReducers(builder) {
     /**
      * Socket Subscribed
      */
-    builder.addCase(socketSubscribed, (state, action) => {
+    builder.addCase(appSocketSubscribed, (state, action) => {
       state.sessionId = action.payload.sessionId;
       state.canceledSession = '';
     });
@@ -291,14 +217,14 @@ export const systemSlice = createSlice({
     /**
      * Socket Unsubscribed
      */
-    builder.addCase(socketUnsubscribed, (state) => {
+    builder.addCase(appSocketUnsubscribed, (state) => {
       state.sessionId = null;
     });
 
     /**
      * Socket Connected
      */
-    builder.addCase(socketConnected, (state) => {
+    builder.addCase(appSocketConnected, (state) => {
       state.isConnected = true;
       state.isCancelable = true;
       state.isProcessing = false;
@@ -313,7 +239,7 @@ export const systemSlice = createSlice({
     /**
      * Socket Disconnected
      */
-    builder.addCase(socketDisconnected, (state) => {
+    builder.addCase(appSocketDisconnected, (state) => {
       state.isConnected = false;
       state.isProcessing = false;
       state.isCancelable = true;
@@ -328,7 +254,7 @@ export const systemSlice = createSlice({
     /**
      * Invocation Started
      */
-    builder.addCase(invocationStarted, (state) => {
+    builder.addCase(appSocketInvocationStarted, (state) => {
       state.isCancelable = true;
       state.isProcessing = true;
       state.currentStatusHasSteps = false;
@@ -342,7 +268,7 @@ export const systemSlice = createSlice({
     /**
      * Generator Progress
      */
-    builder.addCase(generatorProgress, (state, action) => {
+    builder.addCase(appSocketGeneratorProgress, (state, action) => {
       const { step, total_steps, progress_image } = action.payload.data;
 
       state.isProcessing = true;
@@ -359,7 +285,7 @@ export const systemSlice = createSlice({
     /**
      * Invocation Complete
      */
-    builder.addCase(invocationComplete, (state, action) => {
+    builder.addCase(appSocketInvocationComplete, (state, action) => {
       const { data } = action.payload;
 
       // state.currentIteration = 0;
@@ -368,7 +294,6 @@ export const systemSlice = createSlice({
       state.currentStep = 0;
       state.totalSteps = 0;
       state.statusTranslationKey = 'common.statusProcessingComplete';
-      state.progressImage = null;
 
       if (state.canceledSession === data.graph_execution_state_id) {
         state.isProcessing = false;
@@ -377,26 +302,20 @@ export const systemSlice = createSlice({
     });
 
     /**
-     * Invocation Error
+     * Graph Execution State Complete
      */
-    builder.addCase(invocationError, (state) => {
+    builder.addCase(appSocketGraphExecutionStateComplete, (state) => {
       state.isProcessing = false;
-      state.isCancelable = true;
-      // state.currentIteration = 0;
-      // state.totalIterations = 0;
-      state.currentStatusHasSteps = false;
+      state.isCancelable = false;
+      state.isCancelScheduled = false;
       state.currentStep = 0;
       state.totalSteps = 0;
-      state.statusTranslationKey = 'common.statusError';
+      state.statusTranslationKey = 'common.statusConnected';
       state.progressImage = null;
-
-      state.toastQueue.push(
-        makeToast({ title: t('toast.serverError'), status: 'error' })
-      );
     });
 
     /**
-     * Session Invoked - PENDING
+     * User Invoked
      */
 
     builder.addCase(userInvoked, (state) => {
@@ -406,18 +325,11 @@ export const systemSlice = createSlice({
       state.statusTranslationKey = 'common.statusPreparing';
     });
 
-    builder.addCase(sessionInvoked.rejected, (state, action) => {
-      const error = action.payload as string | undefined;
-      state.toastQueue.push(
-        makeToast({ title: error || t('toast.serverError'), status: 'error' })
-      );
-    });
-
     /**
-     * Session Canceled
+     * Session Canceled - FULFILLED
      */
     builder.addCase(sessionCanceled.fulfilled, (state, action) => {
-      state.canceledSession = action.meta.arg.sessionId;
+      state.canceledSession = action.meta.arg.session_id;
       state.isProcessing = false;
       state.isCancelable = false;
       state.isCancelScheduled = false;
@@ -432,53 +344,70 @@ export const systemSlice = createSlice({
     });
 
     /**
-     * Session Canceled
+     * OpenAPI schema was parsed
      */
-    builder.addCase(graphExecutionStateComplete, (state) => {
+    builder.addCase(nodeTemplatesBuilt, (state) => {
+      state.wasSchemaParsed = true;
+    });
+
+    // *** Matchers - must be after all cases ***
+
+    /**
+     * Session Invoked - REJECTED
+     * Session Created - REJECTED
+     */
+    builder.addMatcher(isAnySessionRejected, (state, action) => {
       state.isProcessing = false;
       state.isCancelable = false;
       state.isCancelScheduled = false;
       state.currentStep = 0;
       state.totalSteps = 0;
       state.statusTranslationKey = 'common.statusConnected';
+      state.progressImage = null;
+
+      state.toastQueue.push(
+        makeToast({
+          title: t('toast.serverError'),
+          status: 'error',
+          description:
+            action.payload?.status === 422 ? 'Validation Error' : undefined,
+        })
+      );
     });
 
     /**
-     * Received available models from the backend
+     * Any server error
      */
-    builder.addCase(receivedModels.fulfilled, (state) => {
-      state.wereModelsReceived = true;
-    });
+    builder.addMatcher(isAnyServerError, (state, action) => {
+      state.isProcessing = false;
+      state.isCancelable = true;
+      // state.currentIteration = 0;
+      // state.totalIterations = 0;
+      state.currentStatusHasSteps = false;
+      state.currentStep = 0;
+      state.totalSteps = 0;
+      state.statusTranslationKey = 'common.statusError';
+      state.progressImage = null;
 
-    /**
-     * OpenAPI schema was parsed
-     */
-    builder.addCase(parsedOpenAPISchema, (state) => {
-      state.wasSchemaParsed = true;
+      state.toastQueue.push(
+        makeToast({
+          title: t('toast.serverError'),
+          status: 'error',
+          description: startCase(action.payload.data.error_type),
+        })
+      );
     });
   },
 });
 
 export const {
   setIsProcessing,
-  setIsConnected,
   setShouldConfirmOnDelete,
   setCurrentStatus,
-  setShouldDisplayGuides,
-  processingCanceled,
-  errorOccurred,
   setIsCancelable,
-  modelChangeRequested,
-  modelConvertRequested,
-  modelMergingRequested,
   setEnableImageDebugging,
-  generationRequested,
   addToast,
   clearToastQueue,
-  setProcessingIndeterminateTask,
-  setSearchFolder,
-  setFoundModels,
-  setOpenModel,
   cancelScheduled,
   scheduledCancelAborted,
   cancelTypeChanged,
@@ -488,6 +417,16 @@ export const {
   isPersistedChanged,
   shouldAntialiasProgressImageChanged,
   languageChanged,
+  progressImageSet,
+  setIsNodesEnabled,
+  shouldUseNSFWCheckerChanged,
+  shouldUseWatermarkerChanged,
 } = systemSlice.actions;
 
 export default systemSlice.reducer;
+
+const isAnyServerError = isAnyOf(
+  appSocketInvocationError,
+  appSocketSessionRetrievalError,
+  appSocketInvocationRetrievalError
+);

@@ -1,102 +1,105 @@
 import type { PayloadAction } from '@reduxjs/toolkit';
-import { createSlice } from '@reduxjs/toolkit';
-import { Image } from 'app/types/invokeai';
-import { imageReceived, thumbnailReceived } from 'services/thunks/image';
-
-type GalleryImageObjectFitType = 'contain' | 'cover';
-
-export interface GalleryState {
-  /**
-   * The selected image
-   */
-  selectedImage?: Image;
-  galleryImageMinimumWidth: number;
-  galleryImageObjectFit: GalleryImageObjectFitType;
-  shouldAutoSwitchToNewImages: boolean;
-  galleryWidth: number;
-  shouldUseSingleGalleryColumn: boolean;
-  currentCategory: 'results' | 'uploads';
-}
+import { createSlice, isAnyOf } from '@reduxjs/toolkit';
+import { boardsApi } from 'services/api/endpoints/boards';
+import { imagesApi } from 'services/api/endpoints/images';
+import { ImageDTO } from 'services/api/types';
+import { BoardId, GalleryState, GalleryView } from './types';
 
 export const initialGalleryState: GalleryState = {
-  galleryImageMinimumWidth: 64,
-  galleryImageObjectFit: 'cover',
-  shouldAutoSwitchToNewImages: true,
-  galleryWidth: 300,
-  shouldUseSingleGalleryColumn: false,
-  currentCategory: 'results',
+  selection: [],
+  shouldAutoSwitch: true,
+  autoAssignBoardOnClick: true,
+  autoAddBoardId: 'none',
+  galleryImageMinimumWidth: 96,
+  selectedBoardId: 'none',
+  galleryView: 'images',
+  shouldShowDeleteButton: false,
+  boardSearchText: '',
 };
 
 export const gallerySlice = createSlice({
   name: 'gallery',
   initialState: initialGalleryState,
   reducers: {
-    imageSelected: (state, action: PayloadAction<Image | undefined>) => {
-      state.selectedImage = action.payload;
-      // TODO: if the user selects an image, disable the auto switch?
-      // state.shouldAutoSwitchToNewImages = false;
+    imageSelected: (state, action: PayloadAction<ImageDTO | null>) => {
+      state.selection = action.payload ? [action.payload] : [];
+    },
+    selectionChanged: (state, action: PayloadAction<ImageDTO[]>) => {
+      state.selection = action.payload;
+    },
+    shouldAutoSwitchChanged: (state, action: PayloadAction<boolean>) => {
+      state.shouldAutoSwitch = action.payload;
     },
     setGalleryImageMinimumWidth: (state, action: PayloadAction<number>) => {
       state.galleryImageMinimumWidth = action.payload;
     },
-    setGalleryImageObjectFit: (
-      state,
-      action: PayloadAction<GalleryImageObjectFitType>
-    ) => {
-      state.galleryImageObjectFit = action.payload;
+    autoAssignBoardOnClickChanged: (state, action: PayloadAction<boolean>) => {
+      state.autoAssignBoardOnClick = action.payload;
     },
-    setShouldAutoSwitchToNewImages: (state, action: PayloadAction<boolean>) => {
-      state.shouldAutoSwitchToNewImages = action.payload;
+    boardIdSelected: (state, action: PayloadAction<BoardId>) => {
+      state.selectedBoardId = action.payload;
+      state.galleryView = 'images';
     },
-    setCurrentCategory: (
-      state,
-      action: PayloadAction<'results' | 'uploads'>
-    ) => {
-      state.currentCategory = action.payload;
+    autoAddBoardIdChanged: (state, action: PayloadAction<BoardId>) => {
+      if (!action.payload) {
+        state.autoAddBoardId = 'none';
+        return;
+      }
+      state.autoAddBoardId = action.payload;
     },
-    setGalleryWidth: (state, action: PayloadAction<number>) => {
-      state.galleryWidth = action.payload;
+    galleryViewChanged: (state, action: PayloadAction<GalleryView>) => {
+      state.galleryView = action.payload;
     },
-    setShouldUseSingleGalleryColumn: (
-      state,
-      action: PayloadAction<boolean>
-    ) => {
-      state.shouldUseSingleGalleryColumn = action.payload;
+    shouldShowDeleteButtonChanged: (state, action: PayloadAction<boolean>) => {
+      state.shouldShowDeleteButton = action.payload;
+    },
+    boardSearchTextChanged: (state, action: PayloadAction<string>) => {
+      state.boardSearchText = action.payload;
     },
   },
-  extraReducers(builder) {
-    builder.addCase(imageReceived.fulfilled, (state, action) => {
-      // When we get an updated URL for an image, we need to update the selectedImage in gallery,
-      // which is currently its own object (instead of a reference to an image in results/uploads)
-      const { imagePath } = action.payload;
-      const { imageName } = action.meta.arg;
-
-      if (state.selectedImage?.name === imageName) {
-        state.selectedImage.url = imagePath;
+  extraReducers: (builder) => {
+    builder.addMatcher(isAnyBoardDeleted, (state, action) => {
+      const deletedBoardId = action.meta.arg.originalArgs;
+      if (deletedBoardId === state.selectedBoardId) {
+        state.selectedBoardId = 'none';
+        state.galleryView = 'images';
+      }
+      if (deletedBoardId === state.autoAddBoardId) {
+        state.autoAddBoardId = 'none';
       }
     });
+    builder.addMatcher(
+      boardsApi.endpoints.listAllBoards.matchFulfilled,
+      (state, action) => {
+        const boards = action.payload;
+        if (!state.autoAddBoardId) {
+          return;
+        }
 
-    builder.addCase(thumbnailReceived.fulfilled, (state, action) => {
-      // When we get an updated URL for an image, we need to update the selectedImage in gallery,
-      // which is currently its own object (instead of a reference to an image in results/uploads)
-      const { thumbnailPath } = action.payload;
-      const { thumbnailName } = action.meta.arg;
-
-      if (state.selectedImage?.name === thumbnailName) {
-        state.selectedImage.thumbnail = thumbnailPath;
+        if (!boards.map((b) => b.board_id).includes(state.autoAddBoardId)) {
+          state.autoAddBoardId = 'none';
+        }
       }
-    });
+    );
   },
 });
 
 export const {
   imageSelected,
+  shouldAutoSwitchChanged,
+  autoAssignBoardOnClickChanged,
   setGalleryImageMinimumWidth,
-  setGalleryImageObjectFit,
-  setShouldAutoSwitchToNewImages,
-  setGalleryWidth,
-  setShouldUseSingleGalleryColumn,
-  setCurrentCategory,
+  boardIdSelected,
+  autoAddBoardIdChanged,
+  galleryViewChanged,
+  selectionChanged,
+  shouldShowDeleteButtonChanged,
+  boardSearchTextChanged,
 } = gallerySlice.actions;
 
 export default gallerySlice.reducer;
+
+const isAnyBoardDeleted = isAnyOf(
+  imagesApi.endpoints.deleteBoard.matchFulfilled,
+  imagesApi.endpoints.deleteBoardAndImages.matchFulfilled
+);

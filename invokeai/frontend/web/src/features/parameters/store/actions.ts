@@ -1,12 +1,10 @@
 import { createAction } from '@reduxjs/toolkit';
-import { Image } from 'app/types/invokeai';
-import { ImageType } from 'services/api';
+import { ImageDTO, MainModelField, OnnxModelField } from 'services/api/types';
 
-export type SelectedImage = {
-  name: string;
-  type: ImageType;
-};
+export const initialImageSelected = createAction<ImageDTO | undefined>(
+  'generation/initialImageSelected'
+);
 
-export const initialImageSelected = createAction<
-  Image | SelectedImage | undefined
->('generation/initialImageSelected');
+export const modelSelected = createAction<MainModelField | OnnxModelField>(
+  'generation/modelSelected'
+);

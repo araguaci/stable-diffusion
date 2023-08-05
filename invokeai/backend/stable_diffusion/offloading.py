@@ -4,7 +4,7 @@ import warnings
 import weakref
 from abc import ABCMeta, abstractmethod
 from collections.abc import MutableMapping
-from typing import Callable
+from typing import Callable, Union
 
 import torch
 from accelerate.utils import send_to_device
@@ -95,10 +95,7 @@ class ModelGroup(metaclass=ABCMeta):
         pass
 
     def __repr__(self) -> str:
-        return (
-            f"<{self.__class__.__name__} object at {id(self):x}: "
-            f"device={self.execution_device} >"
-        )
+        return f"<{self.__class__.__name__} object at {id(self):x}: " f"device={self.execution_device} >"
 
 
 class LazilyLoadedModelGroup(ModelGroup):
@@ -117,7 +114,7 @@ class LazilyLoadedModelGroup(ModelGroup):
     """
 
     _hooks: MutableMapping[torch.nn.Module, RemovableHandle]
-    _current_model_ref: Callable[[], torch.nn.Module | _NoModel]
+    _current_model_ref: Callable[[], Union[torch.nn.Module, _NoModel]]
 
     def __init__(self, execution_device: torch.device):
         super().__init__(execution_device)
@@ -143,8 +140,7 @@ class LazilyLoadedModelGroup(ModelGroup):
         self.load(module)
         if len(forward_input) == 0:
             warnings.warn(
-                f"Hook for {module.__class__.__name__} got no input. "
-                f"Inputs must be positional, not keywords.",
+                f"Hook for {module.__class__.__name__} got no input. " f"Inputs must be positional, not keywords.",
                 stacklevel=3,
             )
         return send_to_device(forward_input, self.execution_device)
@@ -157,13 +153,11 @@ class LazilyLoadedModelGroup(ModelGroup):
     def offload_current(self):
         module = self._current_model_ref()
         if module is not NO_MODEL:
-            module.to(device=OFFLOAD_DEVICE)
+            module.to(OFFLOAD_DEVICE)
         self.clear_current_model()
 
     def _load(self, module: torch.nn.Module) -> torch.nn.Module:
-        assert (
-            self.is_empty()
-        ), f"A model is already loaded: {self._current_model_ref()}"
+        assert self.is_empty(), f"A model is already loaded: {self._current_model_ref()}"
         module = module.to(self.execution_device)
         self.set_current_model(module)
         return module
@@ -192,12 +186,8 @@ class LazilyLoadedModelGroup(ModelGroup):
 
     def device_for(self, model):
         if model not in self:
-            raise KeyError(
-                f"This does not manage this model {type(model).__name__}", model
-            )
-        return (
-            self.execution_device
-        )  # this implementation only dispatches to one device
+            raise KeyError(f"This does not manage this model {type(model).__name__}", model)
+        return self.execution_device  # this implementation only dispatches to one device
 
     def ready(self):
         pass  # always ready to load on-demand
@@ -228,7 +218,7 @@ class FullyLoadedModelGroup(ModelGroup):
     def install(self, *models: torch.nn.Module):
         for model in models:
             self._models.add(model)
-            model.to(device=self.execution_device)
+            model.to(self.execution_device)
 
     def uninstall(self, *models: torch.nn.Module):
         for model in models:
@@ -238,11 +228,11 @@ class FullyLoadedModelGroup(ModelGroup):
         self.uninstall(*self._models)
 
     def load(self, model):
-        model.to(device=self.execution_device)
+        model.to(self.execution_device)
 
     def offload_current(self):
         for model in self._models:
-            model.to(device=OFFLOAD_DEVICE)
+            model.to(OFFLOAD_DEVICE)
 
     def ready(self):
         for model in self._models:
@@ -252,16 +242,12 @@ class FullyLoadedModelGroup(ModelGroup):
         self.execution_device = device
         for model in self._models:
             if model.device != OFFLOAD_DEVICE:
-                model.to(device=device)
+                model.to(device)
 
     def device_for(self, model):
         if model not in self:
-            raise KeyError(
-                "This does not manage this model f{type(model).__name__}", model
-            )
-        return (
-            self.execution_device
-        )  # this implementation only dispatches to one device
+            raise KeyError("This does not manage this model f{type(model).__name__}", model)
+        return self.execution_device  # this implementation only dispatches to one device
 
     def __contains__(self, model):
         return model in self._models

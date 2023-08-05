@@ -6,10 +6,7 @@ Copyright (c) 2023 Lincoln Stein and the InvokeAI Development Team
 """
 import argparse
 import curses
-import os
 import sys
-import traceback
-import warnings
 from argparse import Namespace
 from pathlib import Path
 from typing import List, Union
@@ -20,105 +17,18 @@ from diffusers import logging as dlogging
 from npyscreen import widget
 from omegaconf import OmegaConf
 
-from ...backend.globals import (
-    Globals,
-    global_cache_dir,
-    global_config_file,
-    global_models_dir,
-    global_set_root,
-)
-
 import invokeai.backend.util.logging as logger
-from ...backend.model_management import ModelManager
-from ...frontend.install.widgets import FloatTitleSlider
+from invokeai.app.services.config import InvokeAIAppConfig
+from invokeai.backend.model_management import (
+    ModelMerger,
+    MergeInterpolationMethod,
+    ModelManager,
+    ModelType,
+    BaseModelType,
+)
+from invokeai.frontend.install.widgets import FloatTitleSlider, TextBox, SingleSelectColumns
 
-DEST_MERGED_MODEL_DIR = "merged_models"
-
-
-def merge_diffusion_models(
-    model_ids_or_paths: List[Union[str, Path]],
-    alpha: float = 0.5,
-    interp: str = None,
-    force: bool = False,
-    **kwargs,
-) -> DiffusionPipeline:
-    """
-    model_ids_or_paths - up to three models, designated by their local paths or HuggingFace repo_ids
-    alpha  - The interpolation parameter. Ranges from 0 to 1.  It affects the ratio in which the checkpoints are merged. A 0.8 alpha
-               would mean that the first model checkpoints would affect the final result far less than an alpha of 0.2
-    interp - The interpolation method to use for the merging. Supports "sigmoid", "inv_sigmoid", "add_difference" and None.
-               Passing None uses the default interpolation which is weighted sum interpolation. For merging three checkpoints, only "add_difference" is supported.
-    force  - Whether to ignore mismatch in model_config.json for the current models. Defaults to False.
-
-    **kwargs - the default DiffusionPipeline.get_config_dict kwargs:
-         cache_dir, resume_download, force_download, proxies, local_files_only, use_auth_token, revision, torch_dtype, device_map
-    """
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        verbosity = dlogging.get_verbosity()
-        dlogging.set_verbosity_error()
-
-        pipe = DiffusionPipeline.from_pretrained(
-            model_ids_or_paths[0],
-            cache_dir=kwargs.get("cache_dir", global_cache_dir()),
-            custom_pipeline="checkpoint_merger",
-        )
-        merged_pipe = pipe.merge(
-            pretrained_model_name_or_path_list=model_ids_or_paths,
-            alpha=alpha,
-            interp=interp,
-            force=force,
-            **kwargs,
-        )
-        dlogging.set_verbosity(verbosity)
-    return merged_pipe
-
-
-def merge_diffusion_models_and_commit(
-    models: List["str"],
-    merged_model_name: str,
-    alpha: float = 0.5,
-    interp: str = None,
-    force: bool = False,
-    **kwargs,
-):
-    """
-    models - up to three models, designated by their InvokeAI models.yaml model name
-    merged_model_name = name for new model
-    alpha  - The interpolation parameter. Ranges from 0 to 1.  It affects the ratio in which the checkpoints are merged. A 0.8 alpha
-               would mean that the first model checkpoints would affect the final result far less than an alpha of 0.2
-    interp - The interpolation method to use for the merging. Supports "weighted_average", "sigmoid", "inv_sigmoid", "add_difference" and None.
-               Passing None uses the default interpolation which is weighted sum interpolation. For merging three checkpoints, only "add_difference" is supported. Add_difference is A+(B-C).
-    force  - Whether to ignore mismatch in model_config.json for the current models. Defaults to False.
-
-    **kwargs - the default DiffusionPipeline.get_config_dict kwargs:
-         cache_dir, resume_download, force_download, proxies, local_files_only, use_auth_token, revision, torch_dtype, device_map
-    """
-    config_file = global_config_file()
-    model_manager = ModelManager(OmegaConf.load(config_file))
-    for mod in models:
-        assert mod in model_manager.model_names(), f'** Unknown model "{mod}"'
-        assert (
-            model_manager.model_info(mod).get("format", None) == "diffusers"
-        ), f"** {mod} is not a diffusers model. It must be optimized before merging."
-    model_ids_or_paths = [model_manager.model_name_or_path(x) for x in models]
-
-    merged_pipe = merge_diffusion_models(
-        model_ids_or_paths, alpha, interp, force, **kwargs
-    )
-    dump_path = global_models_dir() / DEST_MERGED_MODEL_DIR
-
-    os.makedirs(dump_path, exist_ok=True)
-    dump_path = dump_path / merged_model_name
-    merged_pipe.save_pretrained(dump_path, safe_serialization=1)
-    import_args = dict(
-        model_name=merged_model_name, description=f'Merge of models {", ".join(models)}'
-    )
-    if vae := model_manager.config[models[0]].get("vae", None):
-        logger.info(f"Using configured VAE assigned to {models[0]}")
-        import_args.update(vae=vae)
-    model_manager.import_diffuser_model(dump_path, **import_args)
-    model_manager.commit(config_file)
+config = InvokeAIAppConfig.get_config()
 
 
 def _parse_args() -> Namespace:
@@ -126,7 +36,7 @@ def _parse_args() -> Namespace:
     parser.add_argument(
         "--root_dir",
         type=Path,
-        default=Globals.root,
+        default=config.root,
         help="Path to the invokeai runtime directory",
     )
     parser.add_argument(
@@ -139,9 +49,16 @@ def _parse_args() -> Namespace:
     )
     parser.add_argument(
         "--models",
+        dest="model_names",
         type=str,
         nargs="+",
         help="Two to three model names to be merged",
+    )
+    parser.add_argument(
+        "--base_model",
+        type=str,
+        choices=[x.value for x in BaseModelType],
+        help="The base model shared by the models to be merged",
     )
     parser.add_argument(
         "--merged_model_name",
@@ -200,6 +117,7 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
         window_height, window_width = curses.initscr().getmaxyx()
 
         self.model_names = self.get_model_names()
+        self.current_base = 0
         max_width = max([len(x) for x in self.model_names])
         max_width += 6
         horizontal_layout = max_width * 3 < window_width
@@ -216,12 +134,26 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
             value="Use up and down arrows to move, <space> to select an item, <tab> and <shift-tab> to move from one field to the next.",
             editable=False,
         )
+        self.nextrely += 1
+        self.base_select = self.add_widget_intelligent(
+            SingleSelectColumns,
+            values=[
+                "Models Built on SD-1.x",
+                "Models Built on SD-2.x",
+            ],
+            value=[self.current_base],
+            columns=4,
+            max_height=2,
+            relx=8,
+            scroll_exit=True,
+        )
+        self.base_select.on_changed = self._populate_models
         self.add_widget_intelligent(
             npyscreen.FixedText,
             value="MODEL 1",
             color="GOOD",
             editable=False,
-            rely=4 if horizontal_layout else None,
+            rely=6 if horizontal_layout else None,
         )
         self.model1 = self.add_widget_intelligent(
             npyscreen.SelectOne,
@@ -230,7 +162,7 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
             max_height=len(self.model_names),
             max_width=max_width,
             scroll_exit=True,
-            rely=5,
+            rely=7,
         )
         self.add_widget_intelligent(
             npyscreen.FixedText,
@@ -238,7 +170,7 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
             color="GOOD",
             editable=False,
             relx=max_width + 3 if horizontal_layout else None,
-            rely=4 if horizontal_layout else None,
+            rely=6 if horizontal_layout else None,
         )
         self.model2 = self.add_widget_intelligent(
             npyscreen.SelectOne,
@@ -248,7 +180,7 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
             max_height=len(self.model_names),
             max_width=max_width,
             relx=max_width + 3 if horizontal_layout else None,
-            rely=5 if horizontal_layout else None,
+            rely=7 if horizontal_layout else None,
             scroll_exit=True,
         )
         self.add_widget_intelligent(
@@ -257,7 +189,7 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
             color="GOOD",
             editable=False,
             relx=max_width * 2 + 3 if horizontal_layout else None,
-            rely=4 if horizontal_layout else None,
+            rely=6 if horizontal_layout else None,
         )
         models_plus_none = self.model_names.copy()
         models_plus_none.insert(0, "None")
@@ -270,24 +202,26 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
             max_width=max_width,
             scroll_exit=True,
             relx=max_width * 2 + 3 if horizontal_layout else None,
-            rely=5 if horizontal_layout else None,
+            rely=7 if horizontal_layout else None,
         )
         for m in [self.model1, self.model2, self.model3]:
             m.when_value_edited = self.models_changed
         self.merged_model_name = self.add_widget_intelligent(
-            npyscreen.TitleText,
+            TextBox,
             name="Name for merged model:",
             labelColor="CONTROL",
+            max_height=3,
             value="",
             scroll_exit=True,
         )
         self.force = self.add_widget_intelligent(
             npyscreen.Checkbox,
-            name="Force merge of incompatible models",
+            name="Force merge of models created by different diffusers library versions",
             labelColor="CONTROL",
-            value=False,
+            value=True,
             scroll_exit=True,
         )
+        self.nextrely += 1
         self.merge_method = self.add_widget_intelligent(
             npyscreen.TitleSelectOne,
             name="Merge Method:",
@@ -349,7 +283,8 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
             interp = self.interpolations[self.merge_method.value[0]]
 
         args = dict(
-            models=models,
+            model_names=models,
+            base_model=tuple(BaseModelType)[self.base_select.value[0]],
             alpha=self.alpha.value,
             interp=interp,
             force=self.force.value,
@@ -369,15 +304,11 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
     def validate_field_values(self) -> bool:
         bad_fields = []
         model_names = self.model_names
-        selected_models = set(
-            (model_names[self.model1.value[0]], model_names[self.model2.value[0]])
-        )
+        selected_models = set((model_names[self.model1.value[0]], model_names[self.model2.value[0]]))
         if self.model3.value[0] > 0:
             selected_models.add(model_names[self.model3.value[0] - 1])
         if len(selected_models) < 2:
-            bad_fields.append(
-                f"Please select two or three DIFFERENT models to compare. You selected {selected_models}"
-            )
+            bad_fields.append(f"Please select two or three DIFFERENT models to compare. You selected {selected_models}")
         if len(bad_fields) > 0:
             message = "The following problems were detected and must be corrected:"
             for problem in bad_fields:
@@ -387,21 +318,31 @@ class mergeModelsForm(npyscreen.FormMultiPageAction):
         else:
             return True
 
-    def get_model_names(self) -> List[str]:
+    def get_model_names(self, base_model: BaseModelType = None) -> List[str]:
         model_names = [
-            name
-            for name in self.model_manager.model_names()
-            if self.model_manager.model_info(name).get("format") == "diffusers"
+            info["model_name"]
+            for info in self.model_manager.list_models(model_type=ModelType.Main, base_model=base_model)
+            if info["model_format"] == "diffusers"
         ]
         return sorted(model_names)
 
+    def _populate_models(self, value=None):
+        base_model = tuple(BaseModelType)[value[0]]
+        self.model_names = self.get_model_names(base_model)
+
+        models_plus_none = self.model_names.copy()
+        models_plus_none.insert(0, "None")
+        self.model1.values = self.model_names
+        self.model2.values = self.model_names
+        self.model3.values = models_plus_none
+
+        self.display()
+
+
 class Mergeapp(npyscreen.NPSAppManaged):
-    def __init__(self):
+    def __init__(self, model_manager: ModelManager):
         super().__init__()
-        conf = OmegaConf.load(global_config_file())
-        self.model_manager = ModelManager(
-            conf, "cpu", "float16"
-        )  # precision doesn't really matter here
+        self.model_manager = model_manager
 
     def onStart(self):
         npyscreen.setTheme(npyscreen.Themes.ElegantTheme)
@@ -409,44 +350,39 @@ class Mergeapp(npyscreen.NPSAppManaged):
 
 
 def run_gui(args: Namespace):
-    mergeapp = Mergeapp()
+    model_manager = ModelManager(config.model_conf_path)
+    mergeapp = Mergeapp(model_manager)
     mergeapp.run()
 
     args = mergeapp.merge_arguments
-    merge_diffusion_models_and_commit(**args)
+    merger = ModelMerger(model_manager)
+    merger.merge_diffusion_models_and_save(**args)
     logger.info(f'Models merged into new model: "{args["merged_model_name"]}".')
 
 
 def run_cli(args: Namespace):
     assert args.alpha >= 0 and args.alpha <= 1.0, "alpha must be between 0 and 1"
     assert (
-        args.models and len(args.models) >= 1 and len(args.models) <= 3
+        args.model_names and len(args.model_names) >= 1 and len(args.model_names) <= 3
     ), "Please provide the --models argument to list 2 to 3 models to merge. Use --help for full usage."
 
     if not args.merged_model_name:
-        args.merged_model_name = "+".join(args.models)
-        logger.info(
-            f'No --merged_model_name provided. Defaulting to "{args.merged_model_name}"'
-        )
+        args.merged_model_name = "+".join(args.model_names)
+        logger.info(f'No --merged_model_name provided. Defaulting to "{args.merged_model_name}"')
 
-        model_manager = ModelManager(OmegaConf.load(global_config_file()))
-        assert (
-            args.clobber or args.merged_model_name not in model_manager.model_names()
-        ), f'A model named "{args.merged_model_name}" already exists. Use --clobber to overwrite.'
+    model_manager = ModelManager(config.model_conf_path)
+    assert (
+        not model_manager.model_exists(args.merged_model_name, args.base_model, ModelType.Main) or args.clobber
+    ), f'A model named "{args.merged_model_name}" already exists. Use --clobber to overwrite.'
 
-        merge_diffusion_models_and_commit(**vars(args))
-        logger.info(f'Models merged into new model: "{args.merged_model_name}".')
+    merger = ModelMerger(model_manager)
+    merger.merge_diffusion_models_and_save(**vars(args))
+    logger.info(f'Models merged into new model: "{args.merged_model_name}".')
 
 
 def main():
     args = _parse_args()
-    global_set_root(args.root_dir)
-
-    cache_dir = str(global_cache_dir("hub"))
-    os.environ[
-        "HF_HOME"
-    ] = cache_dir  # because not clear the merge pipeline is honoring cache_dir
-    args.cache_dir = cache_dir
+    config.parse_args(["--root", str(args.root_dir)])
 
     try:
         if args.front_end:
@@ -455,13 +391,9 @@ def main():
             run_cli(args)
     except widget.NotEnoughSpaceForWidget as e:
         if str(e).startswith("Height of 1 allocated"):
-            logger.error(
-                "You need to have at least two diffusers models defined in models.yaml in order to merge"
-            )
+            logger.error("You need to have at least two diffusers models defined in models.yaml in order to merge")
         else:
-            logger.error(
-                "Not enough room for the user interface. Try making this window larger."
-            )
+            logger.error("Not enough room for the user interface. Try making this window larger.")
         sys.exit(-1)
     except Exception as e:
         logger.error(e)

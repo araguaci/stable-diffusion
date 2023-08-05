@@ -1,83 +1,37 @@
 import { createSelector } from '@reduxjs/toolkit';
 import { RootState } from 'app/store/store';
-import { lightboxSelector } from 'features/lightbox/store/lightboxSelectors';
-
+import { defaultSelectorOptions } from 'app/store/util/defaultMemoizeOptions';
+import { ListImagesArgs } from 'services/api/types';
 import {
-  activeTabNameSelector,
-  uiSelector,
-} from 'features/ui/store/uiSelectors';
-import { isEqual } from 'lodash-es';
-import { selectResultsById, selectResultsEntities } from './resultsSlice';
-import { selectUploadsAll, selectUploadsById } from './uploadsSlice';
+  ASSETS_CATEGORIES,
+  IMAGE_CATEGORIES,
+  INITIAL_IMAGE_LIMIT,
+} from './types';
 
 export const gallerySelector = (state: RootState) => state.gallery;
 
-export const imageGallerySelector = createSelector(
-  [
-    (state: RootState) => state,
-    gallerySelector,
-    uiSelector,
-    lightboxSelector,
-    activeTabNameSelector,
-  ],
-  (state, gallery, ui, lightbox, activeTabName) => {
-    const {
-      currentCategory,
-      galleryImageMinimumWidth,
-      galleryImageObjectFit,
-      shouldAutoSwitchToNewImages,
-      galleryWidth,
-      shouldUseSingleGalleryColumn,
-      selectedImage,
-    } = gallery;
-
-    const { shouldPinGallery } = ui;
-
-    const { isLightboxOpen } = lightbox;
-
-    const images =
-      currentCategory === 'results'
-        ? selectResultsEntities(state)
-        : selectUploadsAll(state);
-
-    return {
-      shouldPinGallery,
-      galleryImageMinimumWidth,
-      galleryImageObjectFit,
-      galleryGridTemplateColumns: shouldUseSingleGalleryColumn
-        ? 'auto'
-        : `repeat(auto-fill, minmax(${galleryImageMinimumWidth}px, auto))`,
-      shouldAutoSwitchToNewImages,
-      currentCategory,
-      images,
-      galleryWidth,
-      shouldEnableResize:
-        isLightboxOpen ||
-        (activeTabName === 'unifiedCanvas' && shouldPinGallery)
-          ? false
-          : true,
-      shouldUseSingleGalleryColumn,
-      selectedImage,
-    };
-  },
-  {
-    memoizeOptions: {
-      resultEqualityCheck: isEqual,
-    },
-  }
+export const selectLastSelectedImage = createSelector(
+  (state: RootState) => state,
+  (state) => state.gallery.selection[state.gallery.selection.length - 1],
+  defaultSelectorOptions
 );
 
-export const selectedImageSelector = createSelector(
-  [(state: RootState) => state, gallerySelector],
-  (state, gallery) => {
-    const selectedImage = gallery.selectedImage;
+export const selectListImagesBaseQueryArgs = createSelector(
+  [(state: RootState) => state],
+  (state) => {
+    const { selectedBoardId, galleryView } = state.gallery;
+    const categories =
+      galleryView === 'images' ? IMAGE_CATEGORIES : ASSETS_CATEGORIES;
 
-    if (selectedImage?.type === 'results') {
-      return selectResultsById(state, selectedImage.name);
-    }
+    const listImagesBaseQueryArgs: ListImagesArgs = {
+      board_id: selectedBoardId,
+      categories,
+      offset: 0,
+      limit: INITIAL_IMAGE_LIMIT,
+      is_intermediate: false,
+    };
 
-    if (selectedImage?.type === 'uploads') {
-      return selectUploadsById(state, selectedImage.name);
-    }
-  }
+    return listImagesBaseQueryArgs;
+  },
+  defaultSelectorOptions
 );

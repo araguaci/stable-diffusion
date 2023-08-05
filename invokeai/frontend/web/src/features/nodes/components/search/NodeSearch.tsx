@@ -1,26 +1,25 @@
 import { Box, Flex } from '@chakra-ui/layout';
+import { Tooltip } from '@chakra-ui/tooltip';
+import { useAppToaster } from 'app/components/Toaster';
 import { RootState } from 'app/store/store';
 import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
 import IAIInput from 'common/components/IAIInput';
+import { useBuildInvocation } from 'features/nodes/hooks/useBuildInvocation';
+import { InvocationTemplate } from 'features/nodes/types/types';
+import Fuse from 'fuse.js';
 import { map } from 'lodash-es';
 import {
   ChangeEvent,
   FocusEvent,
   KeyboardEvent,
-  memo,
   ReactNode,
+  memo,
   useCallback,
   useRef,
   useState,
 } from 'react';
-import { Tooltip } from '@chakra-ui/tooltip';
 import { AnyInvocationType } from 'services/events/types';
-import { useBuildInvocation } from 'features/nodes/hooks/useBuildInvocation';
-import { makeToast } from 'features/system/hooks/useToastWatcher';
-import { addToast } from 'features/system/store/systemSlice';
 import { nodeAdded } from '../../store/nodesSlice';
-import Fuse from 'fuse.js';
-import { InvocationTemplate } from 'features/nodes/types/types';
 
 interface NodeListItemProps {
   title: string;
@@ -63,6 +62,7 @@ const NodeSearch = () => {
 
   const buildInvocation = useBuildInvocation();
   const dispatch = useAppDispatch();
+  const toaster = useAppToaster();
 
   const [searchText, setSearchText] = useState<string>('');
   const [showNodeList, setShowNodeList] = useState<boolean>(false);
@@ -89,17 +89,16 @@ const NodeSearch = () => {
       const invocation = buildInvocation(nodeType);
 
       if (!invocation) {
-        const toast = makeToast({
+        toaster({
           status: 'error',
           title: `Unknown Invocation type ${nodeType}`,
         });
-        dispatch(addToast(toast));
         return;
       }
 
       dispatch(nodeAdded(invocation));
     },
-    [dispatch, buildInvocation]
+    [dispatch, buildInvocation, toaster]
   );
 
   const renderNodeList = () => {
@@ -171,15 +170,17 @@ const NodeSearch = () => {
     // }
 
     if (key === 'Enter') {
-      let selectedNodeType: AnyInvocationType;
+      let selectedNodeType: AnyInvocationType | undefined;
 
       if (searchText.length > 0) {
-        selectedNodeType = filteredNodes[focusedIndex].item.type;
+        selectedNodeType = filteredNodes[focusedIndex]?.item.type;
       } else {
-        selectedNodeType = nodes[focusedIndex].type;
+        selectedNodeType = nodes[focusedIndex]?.type;
       }
 
-      addNode(selectedNodeType);
+      if (selectedNodeType) {
+        addNode(selectedNodeType);
+      }
       setShowNodeList(false);
     }
 

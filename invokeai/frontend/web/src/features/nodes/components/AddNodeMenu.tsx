@@ -1,68 +1,129 @@
-import 'reactflow/dist/style.css';
-import { memo, useCallback } from 'react';
-import {
-  Tooltip,
-  Menu,
-  MenuButton,
-  MenuList,
-  MenuItem,
-} from '@chakra-ui/react';
-import { FaEllipsisV } from 'react-icons/fa';
+import { Flex, Text } from '@chakra-ui/react';
+import { createSelector } from '@reduxjs/toolkit';
+import { useAppToaster } from 'app/components/Toaster';
+import { stateSelector } from 'app/store/store';
 import { useAppDispatch, useAppSelector } from 'app/store/storeHooks';
-import { nodeAdded } from '../store/nodesSlice';
+import { defaultSelectorOptions } from 'app/store/util/defaultMemoizeOptions';
+import IAIMantineSearchableSelect from 'common/components/IAIMantineSearchableSelect';
 import { map } from 'lodash-es';
-import { RootState } from 'app/store/store';
-import { useBuildInvocation } from '../hooks/useBuildInvocation';
-import { addToast } from 'features/system/store/systemSlice';
-import { makeToast } from 'features/system/hooks/useToastWatcher';
+import { forwardRef, useCallback } from 'react';
+import 'reactflow/dist/style.css';
 import { AnyInvocationType } from 'services/events/types';
-import IAIIconButton from 'common/components/IAIIconButton';
+import { useBuildInvocation } from '../hooks/useBuildInvocation';
+import { nodeAdded } from '../store/nodesSlice';
+
+type NodeTemplate = {
+  label: string;
+  value: string;
+  description: string;
+};
+
+const selector = createSelector(
+  [stateSelector],
+  ({ nodes }) => {
+    const data: NodeTemplate[] = map(nodes.invocationTemplates, (template) => {
+      return {
+        label: template.title,
+        value: template.type,
+        description: template.description,
+      };
+    });
+
+    data.push({
+      label: 'Progress Image',
+      value: 'progress_image',
+      description: 'Displays the progress image in the Node Editor',
+    });
+
+    return { data };
+  },
+  defaultSelectorOptions
+);
 
 const AddNodeMenu = () => {
   const dispatch = useAppDispatch();
-
-  const invocationTemplates = useAppSelector(
-    (state: RootState) => state.nodes.invocationTemplates
-  );
+  const { data } = useAppSelector(selector);
 
   const buildInvocation = useBuildInvocation();
+
+  const toaster = useAppToaster();
 
   const addNode = useCallback(
     (nodeType: AnyInvocationType) => {
       const invocation = buildInvocation(nodeType);
 
       if (!invocation) {
-        const toast = makeToast({
+        toaster({
           status: 'error',
           title: `Unknown Invocation type ${nodeType}`,
         });
-        dispatch(addToast(toast));
         return;
       }
 
       dispatch(nodeAdded(invocation));
     },
-    [dispatch, buildInvocation]
+    [dispatch, buildInvocation, toaster]
+  );
+
+  const handleChange = useCallback(
+    (v: string | null) => {
+      if (!v) {
+        return;
+      }
+
+      addNode(v as AnyInvocationType);
+    },
+    [addNode]
   );
 
   return (
-    <Menu isLazy>
-      <MenuButton
-        as={IAIIconButton}
-        aria-label="Add Node"
-        icon={<FaEllipsisV />}
+    <Flex sx={{ gap: 2, alignItems: 'center' }}>
+      <IAIMantineSearchableSelect
+        selectOnBlur={false}
+        placeholder="Add Node"
+        value={null}
+        data={data}
+        maxDropdownHeight={400}
+        nothingFound="No matching nodes"
+        itemComponent={SelectItem}
+        filter={(value, item: NodeTemplate) =>
+          item.label.toLowerCase().includes(value.toLowerCase().trim()) ||
+          item.value.toLowerCase().includes(value.toLowerCase().trim()) ||
+          item.description.toLowerCase().includes(value.toLowerCase().trim())
+        }
+        onChange={handleChange}
+        sx={{
+          width: '18rem',
+        }}
       />
-      <MenuList overflowY="scroll" height={400}>
-        {map(invocationTemplates, ({ title, description, type }, key) => {
-          return (
-            <Tooltip key={key} label={description} placement="end" hasArrow>
-              <MenuItem onClick={() => addNode(type)}>{title}</MenuItem>
-            </Tooltip>
-          );
-        })}
-      </MenuList>
-    </Menu>
+    </Flex>
   );
 };
 
-export default memo(AddNodeMenu);
+interface ItemProps extends React.ComponentPropsWithoutRef<'div'> {
+  value: string;
+  label: string;
+  description: string;
+}
+
+const SelectItem = forwardRef<HTMLDivElement, ItemProps>(
+  ({ label, description, ...others }: ItemProps, ref) => {
+    return (
+      <div ref={ref} {...others}>
+        <div>
+          <Text fontWeight={600}>{label}</Text>
+          <Text
+            size="xs"
+            sx={{ color: 'base.600', _dark: { color: 'base.500' } }}
+          >
+            {description}
+          </Text>
+        </div>
+      </div>
+    );
+  }
+);
+
+SelectItem.displayName = 'SelectItem';
+
+export default AddNodeMenu;

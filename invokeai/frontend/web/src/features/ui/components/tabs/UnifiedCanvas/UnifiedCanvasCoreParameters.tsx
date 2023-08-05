@@ -1,81 +1,74 @@
-import { memo } from 'react';
 import { Box, Flex } from '@chakra-ui/react';
 import { createSelector } from '@reduxjs/toolkit';
-import { uiSelector } from 'features/ui/store/uiSelectors';
+import { stateSelector } from 'app/store/store';
 import { useAppSelector } from 'app/store/storeHooks';
 import { defaultSelectorOptions } from 'app/store/util/defaultMemoizeOptions';
-import ModelSelect from 'features/system/components/ModelSelect';
-import ParamIterations from 'features/parameters/components/Parameters/Core/ParamIterations';
-import ParamSteps from 'features/parameters/components/Parameters/Core/ParamSteps';
+import IAICollapse from 'common/components/IAICollapse';
+import ParamBoundingBoxSize from 'features/parameters/components/Parameters/Canvas/BoundingBox/ParamBoundingBoxSize';
 import ParamCFGScale from 'features/parameters/components/Parameters/Core/ParamCFGScale';
-import ParamWidth from 'features/parameters/components/Parameters/Core/ParamWidth';
-import ParamHeight from 'features/parameters/components/Parameters/Core/ParamHeight';
+import ParamIterations from 'features/parameters/components/Parameters/Core/ParamIterations';
+import ParamModelandVAEandScheduler from 'features/parameters/components/Parameters/Core/ParamModelandVAEandScheduler';
+import ParamSteps from 'features/parameters/components/Parameters/Core/ParamSteps';
 import ImageToImageStrength from 'features/parameters/components/Parameters/ImageToImage/ImageToImageStrength';
-import ImageToImageFit from 'features/parameters/components/Parameters/ImageToImage/ImageToImageFit';
-import ParamSampler from 'features/parameters/components/Parameters/Core/ParamSampler';
+import ParamSeedFull from 'features/parameters/components/Parameters/Seed/ParamSeedFull';
+import { memo } from 'react';
 
 const selector = createSelector(
-  uiSelector,
-  (ui) => {
+  stateSelector,
+  ({ ui, generation }) => {
     const { shouldUseSliders } = ui;
+    const { shouldRandomizeSeed } = generation;
 
-    return { shouldUseSliders };
+    const activeLabel = !shouldRandomizeSeed ? 'Manual Seed' : undefined;
+
+    return { shouldUseSliders, activeLabel };
   },
   defaultSelectorOptions
 );
 
 const UnifiedCanvasCoreParameters = () => {
-  const { shouldUseSliders } = useAppSelector(selector);
+  const { shouldUseSliders, activeLabel } = useAppSelector(selector);
 
   return (
-    <Flex
-      sx={{
-        flexDirection: 'column',
-        gap: 2,
-        bg: 'base.800',
-        p: 4,
-        borderRadius: 'base',
-      }}
+    <IAICollapse
+      label={'General'}
+      activeLabel={activeLabel}
+      defaultIsOpen={true}
     >
-      {shouldUseSliders ? (
-        <Flex sx={{ gap: 3, flexDirection: 'column' }}>
-          <ParamIterations />
-          <ParamSteps />
-          <ParamCFGScale />
-          <ParamWidth />
-          <ParamHeight />
-          <ImageToImageStrength />
-          <ImageToImageFit />
-          <Flex gap={3} w="full">
-            <Box flexGrow={2}>
-              <ParamSampler />
-            </Box>
-            <Box flexGrow={3}>
-              <ModelSelect />
-            </Box>
-          </Flex>
-        </Flex>
-      ) : (
-        <Flex sx={{ gap: 2, flexDirection: 'column' }}>
-          <Flex gap={3}>
+      <Flex
+        sx={{
+          flexDirection: 'column',
+          gap: 3,
+        }}
+      >
+        {shouldUseSliders ? (
+          <>
             <ParamIterations />
             <ParamSteps />
             <ParamCFGScale />
-          </Flex>
-          <Flex gap={3} w="full">
-            <Box flexGrow={2}>
-              <ParamSampler />
+            <ParamModelandVAEandScheduler />
+            <Box pt={2}>
+              <ParamSeedFull />
             </Box>
-            <Box flexGrow={3}>
-              <ModelSelect />
+            <ParamBoundingBoxSize />
+          </>
+        ) : (
+          <>
+            <Flex gap={3}>
+              <ParamIterations />
+              <ParamSteps />
+              <ParamCFGScale />
+            </Flex>
+            <ParamModelandVAEandScheduler />
+            <Box pt={2}>
+              <ParamSeedFull />
             </Box>
-          </Flex>
-          <ParamWidth />
-          <ParamHeight />
-          <ImageToImageStrength />
-        </Flex>
-      )}
-    </Flex>
+            <ParamBoundingBoxSize />
+          </>
+        )}
+        <ImageToImageStrength />
+      </Flex>
+    </IAICollapse>
   );
 };
 
